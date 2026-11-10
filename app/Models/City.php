@@ -21,9 +21,19 @@ class City extends Model
         return $this->belongsTo(Company::class);
     }
 
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function locations()
     {
         return $this->hasMany(Location::class);
+    }
+
+    public function routes()
+    {
+        return $this->belongsToMany(Route::class, 'route_cities');
     }
 }
 

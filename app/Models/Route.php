@@ -23,6 +23,11 @@ class Route extends Model
         return $this->belongsTo(Company::class);
     }
 
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function vehicle()
     {
         return $this->belongsTo(Vehicle::class);

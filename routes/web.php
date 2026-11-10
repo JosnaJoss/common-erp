@@ -70,11 +70,18 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         // Categories & Subcategories
         Route::get('/categories', [MasterDataController::class, 'categories'])->name('categories.index');
         Route::post('/categories', [MasterDataController::class, 'categoryStore'])->name('categories.store');
+        Route::get('/categories/{category}/edit', [MasterDataController::class, 'categoryEdit'])->name('categories.edit');
+        Route::put('/categories/{category}', [MasterDataController::class, 'categoryUpdate'])->name('categories.update');
+
         Route::post('/subcategories', [MasterDataController::class, 'subcategoryStore'])->name('subcategories.store');
+        Route::get('/subcategories/{subcategory}/edit', [MasterDataController::class, 'subcategoryEdit'])->name('subcategories.edit');
+        Route::put('/subcategories/{subcategory}', [MasterDataController::class, 'subcategoryUpdate'])->name('subcategories.update');
 
         // Products
         Route::get('/products', [MasterDataController::class, 'products'])->name('products.index');
         Route::post('/products', [MasterDataController::class, 'productStore'])->name('products.store');
+        Route::get('/products/{product}/edit', [MasterDataController::class, 'productEdit'])->name('products.edit');
+        Route::put('/products/{product}', [MasterDataController::class, 'productUpdate'])->name('products.update');
 
         // Items (with 3-tier pricing)
         Route::get('/items', [MasterDataController::class, 'items'])->name('items.index');
@@ -84,11 +91,31 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::put('/items/{item}', [MasterDataController::class, 'itemUpdate'])->name('items.update');
         Route::delete('/items/{item}', [MasterDataController::class, 'itemDestroy'])->name('items.destroy');
 
-        // Vehicles & Routes
+        // Vehicles
         Route::get('/vehicles', [MasterDataController::class, 'vehicles'])->name('vehicles.index');
         Route::post('/vehicles', [MasterDataController::class, 'vehicleStore'])->name('vehicles.store');
+
+        // Territory & Route Management (Routes, Cities, Locations)
         Route::get('/routes', [MasterDataController::class, 'routes'])->name('routes.index');
         Route::post('/routes', [MasterDataController::class, 'routeStore'])->name('routes.store');
+        Route::put('/routes/{route}', [MasterDataController::class, 'routeUpdate'])->name('routes.update');
+        Route::delete('/routes/{route}', [MasterDataController::class, 'routeDestroy'])->name('routes.destroy');
+
+        // Cities
+        Route::get('/cities', [MasterDataController::class, 'routes'])->name('cities.index');
+        Route::post('/cities', [MasterDataController::class, 'cityStore'])->name('cities.store');
+        Route::put('/cities/{city}', [MasterDataController::class, 'cityUpdate'])->name('cities.update');
+        Route::delete('/cities/{city}', [MasterDataController::class, 'cityDestroy'])->name('cities.destroy');
+
+        // Locations
+        Route::get('/locations', [MasterDataController::class, 'routes'])->name('locations.index');
+        Route::post('/locations', [MasterDataController::class, 'locationStore'])->name('locations.store');
+        Route::put('/locations/{location}', [MasterDataController::class, 'locationUpdate'])->name('locations.update');
+        Route::delete('/locations/{location}', [MasterDataController::class, 'locationDestroy'])->name('locations.destroy');
+
+        // Dependent dropdown helper endpoints
+        Route::get('/branches/{branch}/cities', [MasterDataController::class, 'getCitiesByBranch'])->name('branches.cities');
+        Route::get('/cities/{city}/locations', [MasterDataController::class, 'getLocationsByCity'])->name('cities.locations');
     });
 
     // Stakeholders: Suppliers & Customers

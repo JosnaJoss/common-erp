@@ -425,4 +425,502 @@ class ErpCompleteWorkflowTest extends TestCase
         $leavesListResponse->assertStatus(200);
         $leavesListResponse->assertSee('Approved');
     }
+
+    public function test_category_subcategory_product_edit_functionality()
+    {
+        $companyId = $this->company->id;
+        $branchId = $this->company->branches()->first()?->id;
+
+        // --- 1. CATEGORY EDIT & UPDATE ---
+        $category = \App\Models\Category::where('company_id', $companyId)->first();
+        $this->assertNotNull($category);
+        $categoryId = $category->id;
+
+        // Create a subcategory linked to this category to verify relationship preservation
+        $sub = \App\Models\Subcategory::create([
+            'company_id' => $companyId,
+            'category_id' => $categoryId,
+            'name' => 'Original Subcategory ' . rand(100, 999),
+            'status' => 'active',
+        ]);
+        $subId = $sub->id;
+
+        // View categories index (listing page)
+        $catIndexRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->get(route('master.categories.index'));
+        $catIndexRes->assertStatus(200);
+        $catIndexRes->assertSee('Edit Category');
+        $catIndexRes->assertSee('editCategoryModal' . $categoryId);
+        $catIndexRes->assertSee('editSubcategoryModal' . $subId);
+
+        // View Category edit page
+        $catEditRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->get(route('master.categories.edit', $category));
+        $catEditRes->assertStatus(200);
+        $catEditRes->assertSee($category->name);
+
+        // Update Category
+        $updatedCatName = 'Updated Category ' . rand(1000, 9999);
+        $catUpdateRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->put(route('master.categories.update', $category), [
+                'name' => $updatedCatName,
+                'description' => 'Updated Description',
+                'status' => 'active',
+            ]);
+        $catUpdateRes->assertSessionHasNoErrors();
+        $catUpdateRes->assertRedirect(route('master.categories.index'));
+
+        // Verify Category updated in-place (same ID)
+        $category->refresh();
+        $this->assertEquals($categoryId, $category->id);
+        $this->assertEquals($updatedCatName, $category->name);
+        $this->assertEquals('Updated Description', $category->description);
+
+        // Verify child Subcategory relationship remains intact
+        $sub->refresh();
+        $this->assertEquals($categoryId, $sub->category_id);
+        $this->assertEquals($category->name, $sub->category->name);
+
+        // --- 2. SUBCATEGORY EDIT & UPDATE ---
+        // View Subcategory edit page
+        $subEditRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->get(route('master.subcategories.edit', $sub));
+        $subEditRes->assertStatus(200);
+        $subEditRes->assertSee($sub->name);
+
+        // Update Subcategory
+        $updatedSubName = 'Updated Subcategory ' . rand(1000, 9999);
+        $subUpdateRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->put(route('master.subcategories.update', $sub), [
+                'category_id' => $categoryId,
+                'name' => $updatedSubName,
+                'description' => 'Updated Sub description',
+                'status' => 'active',
+            ]);
+        $subUpdateRes->assertSessionHasNoErrors();
+        $subUpdateRes->assertRedirect(route('master.categories.index'));
+
+        // Verify Subcategory updated in-place (same ID)
+        $sub->refresh();
+        $this->assertEquals($subId, $sub->id);
+        $this->assertEquals($updatedSubName, $sub->name);
+        $this->assertEquals($categoryId, $sub->category_id);
+
+        // --- 3. PRODUCT EDIT & UPDATE ---
+        $product = \App\Models\Product::where('company_id', $companyId)->first();
+        if (!$product) {
+            $product = \App\Models\Product::create([
+                'company_id' => $companyId,
+                'category_id' => $categoryId,
+                'subcategory_id' => $subId,
+                'name' => 'Test Motor Product',
+                'code' => 'PRD-TST-001',
+                'status' => 'active',
+            ]);
+        }
+        $productId = $product->id;
+
+        // View Products index (listing page)
+        $prodIndexRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->get(route('master.products.index'));
+        $prodIndexRes->assertStatus(200);
+        $prodIndexRes->assertSee('Actions');
+        $prodIndexRes->assertSee('editProductModal' . $productId);
+
+        // View Product edit page
+        $prodEditRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->get(route('master.products.edit', $product));
+        $prodEditRes->assertStatus(200);
+        $prodEditRes->assertSee($product->name);
+
+        // Update Product
+        $updatedProdName = 'Updated Product ' . rand(1000, 9999);
+        $updatedProdCode = 'PRD-UPD-' . rand(100, 999);
+        $prodUpdateRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branchId])
+            ->put(route('master.products.update', $product), [
+                'category_id' => $categoryId,
+                'subcategory_id' => $subId,
+                'name' => $updatedProdName,
+                'code' => $updatedProdCode,
+                'description' => 'Updated Product Specifications',
+                'status' => 'active',
+            ]);
+        $prodUpdateRes->assertSessionHasNoErrors();
+        $prodUpdateRes->assertRedirect(route('master.products.index'));
+
+        // Verify Product updated in-place (same ID)
+        $product->refresh();
+        $this->assertEquals($productId, $product->id);
+        $this->assertEquals($updatedProdName, $product->name);
+        $this->assertEquals($updatedProdCode, $product->code);
+        $this->assertEquals('Updated Product Specifications', $product->description);
+        $this->assertEquals($categoryId, $product->category_id);
+        $this->assertEquals($subId, $product->subcategory_id);
+    }
+
+    public function test_territory_and_route_management_complete_hierarchy_workflow()
+    {
+        $companyId = $this->company->id;
+        $branch1 = $this->company->branches()->first();
+        $this->assertNotNull($branch1);
+
+        // Create or get second branch for cross-branch testing
+        $branch2 = \App\Models\Branch::firstOrCreate(
+            ['company_id' => $companyId, 'code' => 'BR-TST-02'],
+            ['name' => 'Secondary Branch', 'status' => 'active']
+        );
+
+        // 1. Visit Territory & Route Management page
+        $routesIndexRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->get(route('master.routes.index'));
+        $routesIndexRes->assertStatus(200);
+        $routesIndexRes->assertSee('Territory & Delivery Routes', false);
+        $routesIndexRes->assertSee('City Management');
+        $routesIndexRes->assertSee('Location Management');
+
+        // 2. City Management: Create City under Branch 1
+        $cityName = 'Kochi Test ' . rand(100, 999);
+        $createCityRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->post(route('master.cities.store'), [
+                'branch_id' => $branch1->id,
+                'name' => $cityName,
+                'status' => 'active',
+            ]);
+        $createCityRes->assertSessionHasNoErrors();
+        $createCityRes->assertRedirect(route('master.routes.index', ['tab' => 'cities']));
+
+        $city = \App\Models\City::where('company_id', $companyId)->where('name', $cityName)->first();
+        $this->assertNotNull($city);
+        $this->assertEquals($branch1->id, $city->branch_id);
+
+        // Create another city under Branch 2
+        $cityBranch2 = \App\Models\City::create([
+            'company_id' => $companyId,
+            'branch_id' => $branch2->id,
+            'name' => 'Foreign City ' . rand(100, 999),
+            'status' => 'active',
+        ]);
+
+        // Edit City
+        $updatedCityName = $cityName . ' Updated';
+        $updateCityRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->put(route('master.cities.update', $city), [
+                'branch_id' => $branch1->id,
+                'name' => $updatedCityName,
+                'status' => 'active',
+            ]);
+        $updateCityRes->assertSessionHasNoErrors();
+        $city->refresh();
+        $this->assertEquals($updatedCityName, $city->name);
+
+        // 3. Location Management: Create Location under City
+        $locationName = 'Kakkanad Metro ' . rand(100, 999);
+        $createLocRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->post(route('master.locations.store'), [
+                'city_id' => $city->id,
+                'name' => $locationName,
+                'pincode' => '682030',
+                'status' => 'active',
+            ]);
+        $createLocRes->assertSessionHasNoErrors();
+        $createLocRes->assertRedirect(route('master.routes.index', ['tab' => 'locations']));
+
+        $location = \App\Models\Location::where('city_id', $city->id)->where('name', $locationName)->first();
+        $this->assertNotNull($location);
+        $this->assertEquals('682030', $location->pincode);
+        $this->assertEquals($branch1->id, $location->city->branch_id);
+
+        // Create a foreign location under Branch 2's city
+        $foreignLoc = \App\Models\Location::create([
+            'company_id' => $companyId,
+            'city_id' => $cityBranch2->id,
+            'name' => 'Foreign Area ' . rand(100, 999),
+            'pincode' => '999999',
+            'status' => 'active',
+        ]);
+
+        // Edit Location
+        $updatedLocName = $locationName . ' Zone';
+        $updateLocRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->put(route('master.locations.update', $location), [
+                'city_id' => $city->id,
+                'name' => $updatedLocName,
+                'pincode' => '682031',
+                'status' => 'active',
+            ]);
+        $updateLocRes->assertSessionHasNoErrors();
+        $location->refresh();
+        $this->assertEquals($updatedLocName, $location->name);
+        $this->assertEquals('682031', $location->pincode);
+
+        // 4. Route Management: Enforce Branch Hierarchy
+        // Test cross-branch assignment prevention: trying to assign Branch 2's city to Branch 1's route must fail
+        $invalidRouteRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->post(route('master.routes.store'), [
+                'branch_id' => $branch1->id,
+                'route_name' => 'Invalid Cross Branch Route ' . rand(100, 999),
+                'cities' => [$cityBranch2->id], // Belonging to branch 2!
+                'status' => 'active',
+            ]);
+        $invalidRouteRes->assertSessionHasErrors(['cities']);
+
+        // Test cross-branch location assignment prevention
+        $invalidLocRouteRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->post(route('master.routes.store'), [
+                'branch_id' => $branch1->id,
+                'route_name' => 'Invalid Loc Cross Route ' . rand(100, 999),
+                'cities' => [$city->id],
+                'locations' => [$foreignLoc->id], // Belongs to branch 2!
+                'status' => 'active',
+            ]);
+        $invalidLocRouteRes->assertSessionHasErrors(['locations']);
+
+        // Valid Route Creation under Branch 1
+        $routeName = 'Kochi Central Logistics Route ' . rand(100, 999);
+        $vehicle = \App\Models\Vehicle::where('company_id', $companyId)->first();
+
+        $validRouteRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->post(route('master.routes.store'), [
+                'branch_id' => $branch1->id,
+                'route_name' => $routeName,
+                'vehicle_id' => $vehicle?->id,
+                'assigned_driver' => 'Anand Menon',
+                'cities' => [$city->id],
+                'locations' => [$location->id],
+                'status' => 'active',
+            ]);
+        $validRouteRes->assertSessionHasNoErrors();
+        $validRouteRes->assertRedirect(route('master.routes.index', ['tab' => 'routes']));
+
+        $route = \App\Models\Route::where('company_id', $companyId)->where('route_name', $routeName)->first();
+        $this->assertNotNull($route);
+        $this->assertEquals($branch1->id, $route->branch_id);
+        $this->assertEquals('Anand Menon', $route->assigned_driver);
+        $this->assertTrue($route->cities->contains($city->id));
+        $this->assertTrue($route->locations->contains($location->id));
+
+        // 5. Route Update
+        $updatedRouteName = $routeName . ' Express';
+        $updateRouteRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->put(route('master.routes.update', $route), [
+                'branch_id' => $branch1->id,
+                'route_name' => $updatedRouteName,
+                'vehicle_id' => $vehicle?->id,
+                'assigned_driver' => 'Vijay Nair',
+                'cities' => [$city->id],
+                'locations' => [$location->id],
+                'status' => 'active',
+            ]);
+        $updateRouteRes->assertSessionHasNoErrors();
+        $route->refresh();
+        $this->assertEquals($updatedRouteName, $route->route_name);
+        $this->assertEquals('Vijay Nair', $route->assigned_driver);
+
+        // 6. Delete protections and operations
+        // Attempting to delete city with existing location should be blocked with error
+        $blockedCityDelete = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->delete(route('master.cities.destroy', $city));
+        $blockedCityDelete->assertSessionHas('error');
+
+        // Delete route
+        $deleteRouteRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->delete(route('master.routes.destroy', $route));
+        $deleteRouteRes->assertSessionHasNoErrors();
+        $this->assertNull(\App\Models\Route::find($route->id));
+
+        // Delete location
+        $deleteLocRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->delete(route('master.locations.destroy', $location));
+        $deleteLocRes->assertSessionHasNoErrors();
+        $this->assertNull(\App\Models\Location::find($location->id));
+
+        // Now delete city (location is gone)
+        $deleteCityRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch1->id])
+            ->delete(route('master.cities.destroy', $city));
+        $deleteCityRes->assertSessionHasNoErrors();
+        $this->assertNull(\App\Models\City::find($city->id));
+    }
+
+    public function test_bulk_add_cities_and_locations_workflow()
+    {
+        $companyId = $this->company->id;
+        $branch = \App\Models\Branch::firstOrCreate(
+            ['company_id' => $companyId, 'name' => 'Bulk Test Hub'],
+            ['code' => 'BTH', 'address' => 'Test Hub, Marine Drive', 'city' => 'Kochi', 'state' => 'Kerala', 'pincode' => '682031', 'status' => 'active']
+        );
+
+        // 1. Bulk Add Cities under $branch
+        $cityA = 'Bulk City Alpha ' . rand(100, 999);
+        $cityB = 'Bulk City Beta ' . rand(100, 999);
+        $cityC = 'Bulk City Gamma ' . rand(100, 999);
+
+        $bulkCityRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->post(route('master.cities.store'), [
+                'branch_id' => $branch->id,
+                'cities' => [
+                    ['name' => $cityA, 'status' => 'active'],
+                    ['name' => $cityB, 'status' => 'active'],
+                    ['name' => $cityC, 'status' => 'inactive'],
+                ],
+            ]);
+
+        $bulkCityRes->assertSessionHasNoErrors();
+        $bulkCityRes->assertRedirect(route('master.routes.index', ['tab' => 'cities']));
+        $bulkCityRes->assertSessionHas('success');
+
+        $this->assertDatabaseHas('cities', [
+            'company_id' => $companyId,
+            'branch_id' => $branch->id,
+            'name' => $cityA,
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('cities', [
+            'company_id' => $companyId,
+            'branch_id' => $branch->id,
+            'name' => $cityB,
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('cities', [
+            'company_id' => $companyId,
+            'branch_id' => $branch->id,
+            'name' => $cityC,
+            'status' => 'inactive',
+        ]);
+
+        $createdCityA = \App\Models\City::where('company_id', $companyId)->where('name', $cityA)->first();
+
+        // 2. City Duplicate Validation within Batch
+        $duplicateBatchRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->post(route('master.cities.store'), [
+                'branch_id' => $branch->id,
+                'cities' => [
+                    ['name' => 'SameCityName', 'status' => 'active'],
+                    ['name' => 'SameCityName', 'status' => 'active'],
+                ],
+            ]);
+        $duplicateBatchRes->assertSessionHasErrors(['cities']);
+
+        // 3. City Duplicate Validation with Existing City in Company
+        $duplicateExistingRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->post(route('master.cities.store'), [
+                'branch_id' => $branch->id,
+                'cities' => [
+                    ['name' => $cityA, 'status' => 'active'],
+                ],
+            ]);
+        $duplicateExistingRes->assertSessionHasErrors(['cities']);
+
+        // 4. Bulk Add Locations under $createdCityA
+        $locA = 'Loc Alpha ' . rand(100, 999);
+        $locB = 'Loc Beta ' . rand(100, 999);
+        $locC = 'Loc Gamma ' . rand(100, 999);
+
+        $bulkLocRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->post(route('master.locations.store'), [
+                'city_id' => $createdCityA->id,
+                'locations' => [
+                    ['name' => $locA, 'pincode' => '682001', 'status' => 'active'],
+                    ['name' => $locB, 'pincode' => '682002', 'status' => 'active'],
+                    ['name' => $locC, 'pincode' => null, 'status' => 'inactive'],
+                ],
+            ]);
+
+        $bulkLocRes->assertSessionHasNoErrors();
+        $bulkLocRes->assertRedirect(route('master.routes.index', ['tab' => 'locations']));
+        $bulkLocRes->assertSessionHas('success');
+
+        $this->assertDatabaseHas('locations', [
+            'company_id' => $companyId,
+            'city_id' => $createdCityA->id,
+            'name' => $locA,
+            'pincode' => '682001',
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('locations', [
+            'company_id' => $companyId,
+            'city_id' => $createdCityA->id,
+            'name' => $locB,
+            'pincode' => '682002',
+            'status' => 'active',
+        ]);
+        $this->assertDatabaseHas('locations', [
+            'company_id' => $companyId,
+            'city_id' => $createdCityA->id,
+            'name' => $locC,
+            'status' => 'inactive',
+        ]);
+
+        // 5. Location Duplicate Validation within Batch
+        $duplicateLocBatchRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->post(route('master.locations.store'), [
+                'city_id' => $createdCityA->id,
+                'locations' => [
+                    ['name' => 'SameLocationName', 'pincode' => '111111', 'status' => 'active'],
+                    ['name' => 'SameLocationName', 'pincode' => '222222', 'status' => 'active'],
+                ],
+            ]);
+        $duplicateLocBatchRes->assertSessionHasErrors(['locations']);
+
+        // 6. Location Duplicate Validation with Existing Location under that City
+        $duplicateLocExistingRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->post(route('master.locations.store'), [
+                'city_id' => $createdCityA->id,
+                'locations' => [
+                    ['name' => $locA, 'pincode' => '682001', 'status' => 'active'],
+                ],
+            ]);
+        $duplicateLocExistingRes->assertSessionHasErrors(['locations']);
+
+        // 7. Verify existing edit functionality still works intact
+        $updatedCityName = $cityA . ' Modified';
+        $editCityRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->put(route('master.cities.update', $createdCityA), [
+                'branch_id' => $branch->id,
+                'name' => $updatedCityName,
+                'status' => 'active',
+            ]);
+        $editCityRes->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('cities', ['id' => $createdCityA->id, 'name' => $updatedCityName]);
+
+        $createdLocA = \App\Models\Location::where('city_id', $createdCityA->id)->where('name', $locA)->first();
+        $updatedLocName = $locA . ' Modified';
+        $editLocRes = $this->actingAs($this->adminUser)
+            ->withSession(['active_company_id' => $companyId, 'active_branch_id' => $branch->id])
+            ->put(route('master.locations.update', $createdLocA), [
+                'city_id' => $createdCityA->id,
+                'name' => $updatedLocName,
+                'pincode' => '682099',
+                'status' => 'active',
+            ]);
+        $editLocRes->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('locations', ['id' => $createdLocA->id, 'name' => $updatedLocName, 'pincode' => '682099']);
+    }
 }

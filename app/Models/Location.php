@@ -17,9 +17,24 @@ class Location extends Model
         'status',
     ];
 
+    public function company()
+    {
+        return $this->belongsTo(Company::class);
+    }
+
     public function city()
     {
         return $this->belongsTo(City::class);
+    }
+
+    public function routes()
+    {
+        return $this->belongsToMany(Route::class, 'route_locations');
+    }
+
+    public function getBranchAttribute()
+    {
+        return $this->city?->branch;
     }
 }
 

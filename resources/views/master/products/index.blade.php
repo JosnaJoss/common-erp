@@ -24,6 +24,7 @@
                         <th>Subcategory</th>
                         <th>Description</th>
                         <th>Status</th>
+                        <th class="text-end pe-4">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -41,13 +42,23 @@
                                 {{ ucfirst($prod->status) }}
                             </span>
                         </td>
+                        <td class="text-end pe-4">
+                            <button type="button" class="btn btn-sm btn-light border text-primary" data-bs-toggle="modal" data-bs-target="#editProductModal{{ $prod->id }}" title="Edit Product {{ $prod->name }}">
+                                <i class="bi bi-pencil me-1"></i> Edit
+                            </button>
+                        </td>
                     </tr>
                     @empty
-                    <tr><td colspan="5" class="text-center py-4 text-muted">No products defined yet.</td></tr>
+                    <tr><td colspan="6" class="text-center py-4 text-muted">No products defined yet.</td></tr>
                     @endforelse
                 </tbody>
             </table>
         </div>
+        @if($products->hasPages())
+        <div class="p-3 border-top">
+            {{ $products->links() }}
+        </div>
+        @endif
     </div>
 </div>
 
@@ -91,7 +102,7 @@
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Description</label>
-                    <textarea name="description" class="form-control" rows="2"></textarea>
+                    <textarea name="description" class="form-control" rows="2" placeholder="Optional product description..."></textarea>
                 </div>
                 <div class="mb-3">
                     <label class="form-label small fw-semibold">Status</label>
@@ -108,5 +119,65 @@
         </form>
     </div>
 </div>
-@endsection
 
+<!-- Edit Product Modals -->
+@foreach($products as $prod)
+<div class="modal fade" id="editProductModal{{ $prod->id }}" tabindex="-1">
+    <div class="modal-dialog">
+        <form action="{{ route('master.products.update', $prod) }}" method="POST" class="modal-content">
+            @csrf
+            @method('PUT')
+            <div class="modal-header">
+                <h5 class="modal-title fw-bold"><i class="bi bi-pencil-square text-primary me-2"></i>Edit Product: {{ $prod->name }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Product Name <span class="text-danger">*</span></label>
+                    <input type="text" name="name" class="form-control" value="{{ old('name', $prod->name) }}" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Product Code <span class="text-danger">*</span></label>
+                    <input type="text" name="code" class="form-control" value="{{ old('code', $prod->code) }}" required>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Category</label>
+                        <select name="category_id" class="form-select">
+                            <option value="">Select Category</option>
+                            @foreach($categories as $cat)
+                            <option value="{{ $cat->id }}" {{ old('category_id', $prod->category_id) == $cat->id ? 'selected' : '' }}>{{ $cat->name }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Subcategory</label>
+                        <select name="subcategory_id" class="form-select">
+                            <option value="">Select Subcategory</option>
+                            @foreach($subcategories as $sub)
+                            <option value="{{ $sub->id }}" {{ old('subcategory_id', $prod->subcategory_id) == $sub->id ? 'selected' : '' }}>{{ $sub->name }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Description</label>
+                    <textarea name="description" class="form-control" rows="2">{{ old('description', $prod->description) }}</textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="active" {{ old('status', $prod->status) === 'active' ? 'selected' : '' }}>Active</option>
+                        <option value="inactive" {{ old('status', $prod->status) === 'inactive' ? 'selected' : '' }}>Inactive</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Update Product</button>
+            </div>
+        </form>
+    </div>
+</div>
+@endforeach
+@endsection

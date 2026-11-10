@@ -44,5 +44,15 @@ class Branch extends Model
     {
         return $this->hasMany(User::class);
     }
+
+    public function cities()
+    {
+        return $this->hasMany(City::class);
+    }
+
+    public function routes()
+    {
+        return $this->hasMany(Route::class);
+    }
 }
 
