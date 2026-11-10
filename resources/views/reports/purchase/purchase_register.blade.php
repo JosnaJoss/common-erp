@@ -1,0 +1,136 @@
+@extends('layouts.app')
+
+@section('title', 'Purchase Register Report')
+
+@section('content')
+<div class="d-flex justify-content-between align-items-center mb-4 d-print-none">
+    <div>
+        <h4 class="fw-bold mb-1">Purchase Register Report</h4>
+        <p class="text-muted small mb-0">Periodic procurement ledger register: Inward purchases, Input GST tax credits, and disbursements</p>
+    </div>
+    <div class="d-flex gap-2">
+        <button onclick="window.print()" class="btn btn-outline-dark">
+            <i class="bi bi-printer me-1"></i> Print Register
+        </button>
+    </div>
+</div>
+
+<!-- Date Filter Form -->
+<div class="card shadow-sm border-0 mb-4 d-print-none">
+    <div class="card-body">
+        <form method="GET" action="{{ route('reports.purchase.purchase_register') }}" class="row g-2 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small fw-bold">From Date</label>
+                <input type="date" name="start_date" class="form-control form-control-sm" value="{{ $startDate }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small fw-bold">To Date</label>
+                <input type="date" name="end_date" class="form-control form-control-sm" value="{{ $endDate }}">
+            </div>
+            <div class="col-md-4 d-flex gap-2">
+                <button type="submit" class="btn btn-sm btn-primary flex-grow-1"><i class="bi bi-calendar-range me-1"></i> Generate Register</button>
+                <a href="{{ route('reports.purchase.purchase_register') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm border p-4 bg-white" id="purchase-register-printable">
+    <!-- Header -->
+    <div class="text-center border-bottom pb-3 mb-4">
+        <h3 class="fw-bold text-primary mb-1">{{ auth()->user()->company->name ?? 'Common ERP Enterprise' }}</h3>
+        <h5 class="fw-bold text-dark mb-0">PURCHASE REGISTER</h5>
+        <div class="text-muted small">Period from {{ \Carbon\Carbon::parse($startDate)->format('d M Y') }} to {{ \Carbon\Carbon::parse($endDate)->format('d M Y') }}</div>
+    </div>
+
+    <!-- Summary KPI cards -->
+    <div class="row g-3 mb-4 d-print-none">
+        <div class="col-md-3">
+            <div class="card bg-light border p-3">
+                <small class="text-muted text-uppercase fw-bold">Taxable Purchases</small>
+                <h5 class="fw-bold mb-0 text-dark">₹ {{ number_format($totalSubtotal, 2) }}</h5>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-light border p-3">
+                <small class="text-muted text-uppercase fw-bold">Input GST Credit</small>
+                <h5 class="fw-bold mb-0 text-info">₹ {{ number_format($totalTax, 2) }}</h5>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-light border p-3">
+                <small class="text-muted text-uppercase fw-bold">Total Bill Value</small>
+                <h5 class="fw-bold mb-0 text-primary">₹ {{ number_format($totalGrand, 2) }}</h5>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-light border p-3">
+                <small class="text-muted text-uppercase fw-bold">Payables Balance</small>
+                <h5 class="fw-bold mb-0 text-danger">₹ {{ number_format($totalBalance, 2) }}</h5>
+            </div>
+        </div>
+    </div>
+
+    <!-- Register Table -->
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Entry #</th>
+                    <th>Supplier Invoice #</th>
+                    <th>Date</th>
+                    <th>Supplier Name</th>
+                    <th>GSTIN</th>
+                    <th class="text-end">Taxable Value (₹)</th>
+                    <th class="text-end">Input GST (₹)</th>
+                    <th class="text-end">Grand Total (₹)</th>
+                    <th class="text-end">Paid (₹)</th>
+                    <th class="text-end">Balance (₹)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @forelse($entries as $pe)
+                    <tr>
+                        <td>
+                            <a href="{{ route('purchase.entries.show', $pe) }}" class="fw-bold text-decoration-none">
+                                {{ $pe->purchase_number }}
+                            </a>
+                        </td>
+                        <td>{{ $pe->invoice_number }}</td>
+                        <td>{{ \Carbon\Carbon::parse($pe->invoice_date)->format('d M Y') }}</td>
+                        <td>
+                            <div class="fw-semibold">{{ $pe->supplier->name ?? 'Supplier' }}</div>
+                            <small class="text-muted">{{ $pe->supplier->city ?? '' }}</small>
+                        </td>
+                        <td><small class="text-muted">{{ $pe->supplier->gst_number ?? '-' }}</small></td>
+                        <td class="text-end">₹ {{ number_format($pe->subtotal, 2) }}</td>
+                        <td class="text-end">₹ {{ number_format($pe->tax_amount, 2) }}</td>
+                        <td class="text-end fw-bold">₹ {{ number_format($pe->grand_total, 2) }}</td>
+                        <td class="text-end text-success">₹ {{ number_format($pe->paid_amount, 2) }}</td>
+                        <td class="text-end fw-bold {{ $pe->balance_amount > 0 ? 'text-danger' : 'text-muted' }}">
+                            ₹ {{ number_format($pe->balance_amount, 2) }}
+                        </td>
+                    </tr>
+                @empty
+                    <tr>
+                        <td colspan="10" class="text-center py-4 text-muted">
+                            No purchase entries found in this date range.
+                        </td>
+                    </tr>
+                @endforelse
+            </tbody>
+            <tfoot class="bg-light fw-bold fs-6">
+                <tr>
+                    <td colspan="5" class="text-end">Register Totals:</td>
+                    <td class="text-end">₹ {{ number_format($totalSubtotal, 2) }}</td>
+                    <td class="text-end">₹ {{ number_format($totalTax, 2) }}</td>
+                    <td class="text-end text-primary">₹ {{ number_format($totalGrand, 2) }}</td>
+                    <td class="text-end text-success">₹ {{ number_format($totalPaid, 2) }}</td>
+                    <td class="text-end text-danger">₹ {{ number_format($totalBalance, 2) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+@endsection
+
