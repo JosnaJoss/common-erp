@@ -375,5 +375,54 @@ class ErpCompleteWorkflowTest extends TestCase
             'title' => 'National ID Card',
             'document_type' => 'ID Proof',
         ]);
+
+        // 6. Test Leave Application Submission & Approval Workflow
+        $leaveApplyResponse = $this->actingAs($this->adminUser)
+            ->withSession([
+                'active_company_id' => $this->company->id,
+                'active_branch_id' => $this->company->branches()->first()?->id,
+            ])
+            ->post(route('staff.leaves.store'), [
+                'staff_id' => $staff->id,
+                'leave_type' => 'Casual',
+                'start_date' => now()->toDateString(),
+                'end_date' => now()->addDays(2)->toDateString(),
+                'reason' => 'Family vacation',
+            ]);
+
+        $leaveApplyResponse->assertSessionHasNoErrors();
+
+        $leave = \App\Models\LeaveApplication::where('staff_id', $staff->id)->latest()->first();
+        $this->assertNotNull($leave);
+        $this->assertEquals('pending', $leave->status);
+
+        // Approve the leave application
+        $approveResponse = $this->actingAs($this->adminUser)
+            ->withSession([
+                'active_company_id' => $this->company->id,
+                'active_branch_id' => $this->company->branches()->first()?->id,
+            ])
+            ->post(route('staff.leaves.status', $leave), [
+                'status' => 'approved',
+                'approval_remarks' => 'Approved by manager',
+            ]);
+
+        $approveResponse->assertSessionHasNoErrors();
+
+        $leave->refresh();
+        $this->assertEquals('approved', $leave->status);
+        $this->assertEquals($this->adminUser->id, $leave->approved_by);
+        $this->assertEquals('Approved by manager', $leave->approval_remarks);
+
+        // Verify leaves list page reflects the Approved status
+        $leavesListResponse = $this->actingAs($this->adminUser)
+            ->withSession([
+                'active_company_id' => $this->company->id,
+                'active_branch_id' => $this->company->branches()->first()?->id,
+            ])
+            ->get(route('staff.leaves.index'));
+
+        $leavesListResponse->assertStatus(200);
+        $leavesListResponse->assertSee('Approved');
     }
 }

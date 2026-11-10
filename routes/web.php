@@ -120,7 +120,7 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         // Leaves
         Route::get('/leaves/list', [LeaveController::class, 'index'])->name('leaves.index');
         Route::post('/leaves', [LeaveController::class, 'store'])->name('leaves.store');
-        Route::post('/leaves/{leaveApplication}/status', [LeaveController::class, 'updateStatus'])->name('leaves.status');
+        Route::post('/leaves/{leave}/status', [LeaveController::class, 'updateStatus'])->name('leaves.status');
 
         // Overtime
         Route::get('/overtime/list', [AttendanceController::class, 'overtime'])->name('overtime.index');

@@ -45,8 +45,13 @@ class LeaveController extends Controller
         return back()->with('success', 'Leave application submitted successfully.');
     }
 
-    public function updateStatus(Request $request, LeaveApplication $leave)
+    public function updateStatus(Request $request, LeaveApplication $leave = null)
     {
+        if (!$leave || !$leave->exists) {
+            $id = $request->route('leave') ?? $request->route('leaveApplication');
+            $leave = LeaveApplication::findOrFail($id);
+        }
+
         $data = $request->validate([
             'status' => 'required|in:approved,rejected',
             'approval_remarks' => 'nullable|string',
