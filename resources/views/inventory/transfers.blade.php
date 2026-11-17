@@ -26,7 +26,8 @@
                         <th>Destination Godown</th>
                         <th>Transferred Items</th>
                         <th>Status</th>
-                        <th>Remarks</th>
+                        <th>Remarks / Timeline</th>
+                        <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -34,19 +35,74 @@
                         <tr>
                             <td><span class="badge bg-light text-primary border fw-bold">{{ $trf->transfer_no }}</span></td>
                             <td>{{ \Carbon\Carbon::parse($trf->transfer_date)->format('d M Y') }}</td>
-                            <td><i class="bi bi-box-arrow-up text-danger me-1"></i> {{ $trf->sourceGodown->name ?? 'N/A' }}</td>
-                            <td><i class="bi bi-box-arrow-down text-success me-1"></i> {{ $trf->destGodown->name ?? 'N/A' }}</td>
+                            <td>
+                                <div>
+                                    <i class="bi bi-box-arrow-up text-danger me-1"></i> {{ $trf->sourceGodown->name ?? 'N/A' }}
+                                </div>
+                                <span class="badge bg-light text-muted border" style="font-size: 0.7rem;">
+                                    {{ strtoupper($trf->sourceGodown->location_type ?? 'warehouse') }}
+                                </span>
+                            </td>
+                            <td>
+                                <div>
+                                    <i class="bi bi-box-arrow-down text-success me-1"></i> {{ $trf->destGodown->name ?? 'N/A' }}
+                                </div>
+                                <span class="badge bg-light text-muted border" style="font-size: 0.7rem;">
+                                    {{ strtoupper($trf->destGodown->location_type ?? 'warehouse') }}
+                                </span>
+                            </td>
                             <td>
                                 @foreach($trf->items as $ti)
                                     <div><strong>{{ $ti->item->name ?? 'Item' }}:</strong> {{ number_format($ti->quantity, 2) }} {{ $ti->item->unit->symbol ?? '' }}</div>
                                 @endforeach
                             </td>
-                            <td><span class="badge bg-success">{{ ucfirst($trf->status) }}</span></td>
-                            <td><small class="text-muted">{{ $trf->remarks ?? '-' }}</small></td>
+                            <td>
+                                @switch($trf->status)
+                                    @case('pending')
+                                        <span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>Pending Dispatch</span>
+                                        @break
+                                    @case('in_transit')
+                                        <span class="badge bg-info text-dark"><i class="bi bi-truck me-1"></i>In-Transit</span>
+                                        @break
+                                    @case('completed')
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Completed</span>
+                                        @break
+                                    @default
+                                        <span class="badge bg-secondary">{{ ucfirst($trf->status) }}</span>
+                                @endswitch
+                            </td>
+                            <td>
+                                <small class="text-muted d-block">{{ $trf->remarks ?? '-' }}</small>
+                                @if($trf->dispatched_at)
+                                <small class="text-muted" style="font-size: 0.7rem;">Dispatched: {{ $trf->dispatched_at->format('d/m H:i') }}</small>
+                                @endif
+                                @if($trf->received_at)
+                                <small class="text-success d-block" style="font-size: 0.7rem;">Received: {{ $trf->received_at->format('d/m H:i') }}</small>
+                                @endif
+                            </td>
+                            <td class="text-end">
+                                @if($trf->status === 'pending')
+                                <form method="POST" action="{{ route('inventory.transfers.dispatch', $trf->id) }}" class="d-inline">
+                                    @csrf
+                                    <button type="submit" class="btn btn-sm btn-outline-primary" onclick="return confirm('Dispatch this transfer and deduct stock from source warehouse?')">
+                                        <i class="bi bi-truck me-1"></i> Dispatch
+                                    </button>
+                                </form>
+                                @elseif($trf->status === 'in_transit')
+                                <form method="POST" action="{{ route('inventory.transfers.receive', $trf->id) }}" class="d-inline">
+                                    @csrf
+                                    <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm receipt and add stock to destination warehouse?')">
+                                        <i class="bi bi-box-seam me-1"></i> Confirm Receipt
+                                    </button>
+                                </form>
+                                @else
+                                <span class="badge bg-light text-success border"><i class="bi bi-check-all"></i> Finalized</span>
+                                @endif
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="7" class="text-center py-4 text-muted">
+                            <td colspan="8" class="text-center py-4 text-muted">
                                 <i class="bi bi-arrow-left-right fs-2 d-block mb-2"></i> No stock transfers recorded yet.
                             </td>
                         </tr>
@@ -112,6 +168,13 @@
                         <div class="col-md-6">
                             <label class="form-label fw-bold">Transfer Date <span class="text-danger">*</span></label>
                             <input type="date" name="transfer_date" class="form-control" value="{{ date('Y-m-d') }}" required>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Transfer Execution Mode <span class="text-danger">*</span></label>
+                            <select name="mode" class="form-select" required>
+                                <option value="completed" selected>Immediate Transfer (Deduct & Receive Now)</option>
+                                <option value="pending">Two-Step Workflow (Initiate Pending &rarr; Dispatch &rarr; Receive)</option>
+                            </select>
                         </div>
                         <div class="col-12">
                             <label class="form-label fw-bold">Reason / Transport Remarks</label>

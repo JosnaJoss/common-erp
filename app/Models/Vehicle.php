@@ -37,5 +37,10 @@ class Vehicle extends Model
     {
         return $this->belongsTo(Branch::class);
     }
+
+    public function mobileGodown()
+    {
+        return $this->hasOne(Godown::class, 'vehicle_id');
+    }
 }
 

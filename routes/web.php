@@ -5,6 +5,8 @@ use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\CustomerController;
+use App\Http\Controllers\DailyOperationController;
+use App\Http\Controllers\DailyOperationReportController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LeaveController;
@@ -171,6 +173,8 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::post('/outward', [InventoryController::class, 'outwardStore'])->name('outward.store');
         Route::get('/transfers', [InventoryController::class, 'transfers'])->name('transfers');
         Route::post('/transfers', [InventoryController::class, 'transferStore'])->name('transfers.store');
+        Route::post('/transfers/{transfer}/dispatch', [InventoryController::class, 'transferDispatch'])->name('transfers.dispatch');
+        Route::post('/transfers/{transfer}/receive', [InventoryController::class, 'transferReceive'])->name('transfers.receive');
         Route::get('/adjustments', [InventoryController::class, 'adjustments'])->name('adjustments');
         Route::post('/adjustments', [InventoryController::class, 'adjustmentStore'])->name('adjustments.store');
         Route::get('/alerts', [InventoryController::class, 'alerts'])->name('alerts');
@@ -239,8 +243,24 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::post('/financial-years', [AccountsController::class, 'financialYearStore'])->name('financial_years.store');
     });
 
+    // Daily Operations & Work Reports
+    Route::prefix('operations')->name('daily_operations.')->group(function () {
+        Route::get('/', [DailyOperationController::class, 'index'])->name('index');
+        Route::get('/create', [DailyOperationController::class, 'create'])->name('create');
+        Route::post('/', [DailyOperationController::class, 'store'])->name('store');
+        Route::get('/{daily_operation}', [DailyOperationController::class, 'show'])->name('show');
+        Route::post('/{daily_operation}/submit', [DailyOperationController::class, 'submit'])->name('submit');
+        Route::post('/{daily_operation}/approve', [DailyOperationController::class, 'approve'])->name('approve');
+        Route::post('/{daily_operation}/reject', [DailyOperationController::class, 'reject'])->name('reject');
+        Route::get('/helpers/department-staff/{department}', [DailyOperationController::class, 'getDepartmentStaff'])->name('helpers.staff');
+        Route::get('/helpers/item-stock', [DailyOperationController::class, 'getItemStock'])->name('helpers.stock');
+    });
+
     // Reports (Financial, Inventory, Sales, Purchase, Staff)
     Route::prefix('reports')->name('reports.')->group(function () {
+        // Daily Operations Executive Report
+        Route::get('/daily-operations', [DailyOperationReportController::class, 'index'])->name('daily_operations.index');
+
         // Financial
         Route::get('/trial-balance', [ReportController::class, 'trialBalance'])->name('financial.trial_balance');
         Route::get('/profit-and-loss', [ReportController::class, 'profitAndLoss'])->name('financial.profit_and_loss');

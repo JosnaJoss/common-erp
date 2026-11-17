@@ -16,10 +16,12 @@ use App\Models\Product;
 use App\Models\Role;
 use App\Models\Route;
 use App\Models\Shift;
+use App\Models\Staff;
 use App\Models\Subcategory;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\DailyOperationService;
 use Illuminate\Support\Facades\Hash;
 
 class KanchinadFoodsSeeder extends BaseIndustrySeeder
@@ -830,6 +832,100 @@ class KanchinadFoodsSeeder extends BaseIndustrySeeder
                 $ledgers, 'SRT-KF-2026-0001', '2026-08-28', 'Pouch seal crush during transit delivery'
             );
         }
+
+        // 18b. Daily Operations Management (Parts 3, 4, and 5)
+        $dailyOpService = new DailyOperationService($this->inventoryService);
+
+        $godownVan1 = $this->inventoryService->ensureMobileVanGodown($vehicle1);
+        $godownCounter = Godown::firstOrCreate(['company_id' => $company->id, 'code' => 'WH-KF-COUNTER'], [
+            'branch_id' => $branchKochi->id,
+            'name' => 'Factory Retail Sales Counter',
+            'location_type' => 'sales_outlet',
+            'address' => 'Factory Gate Counter, Puthencruz',
+            'status' => 'active',
+        ]);
+        $godownCalicut = Godown::firstOrCreate(['company_id' => $company->id, 'code' => 'WH-KF-CLT-01'], [
+            'branch_id' => $branchCalicut->id,
+            'name' => 'Calicut Regional Stock Depot',
+            'location_type' => 'warehouse',
+            'address' => 'Kallai Road Goods Shed',
+            'postal_code' => '673003',
+            'status' => 'active',
+        ]);
+
+        $workerRadhakrishnan = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-KF-008')->first();
+        $workerPradeep = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-KF-017')->first();
+        $leadJoy = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-KF-004')->first();
+        $opBiju = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-KF-010')->first();
+        $headMadhavan = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-KF-002')->first();
+
+        // 1. Part 4 Example: Production Department Daily Report - Chicken Masala Batch
+        $dailyOpService->createOperation([
+            'company_id' => $company->id,
+            'branch_id' => $branchKochi->id,
+            'department_id' => $deptMill->id,
+            'operation_number' => 'DOP-KF-20261015-001',
+            'operation_date' => '2026-10-15',
+            'department_head_id' => $headMadhavan?->id,
+            'supervisor_id' => $workerRadhakrishnan?->id,
+            'work_order_ref' => 'WO-KF-CHICKEN-01',
+            'process_name' => 'Formulation Spice Ribbon Blending',
+            'work_description' => 'Precision dry blending and micro-roasting of premium Chicken Masala batch.',
+            'start_time' => '08:00:00',
+            'end_time' => '17:00:00',
+            'work_status' => 'completed',
+            'approval_status' => 'department_head_approved',
+            'remarks' => 'Batch aroma, granulation and volatile oil content fully meet FSSAI quality standards.',
+        ], [
+            ['staff_id' => $workerRadhakrishnan->id, 'employment_type' => 'salaried', 'hours_worked' => 8.0, 'units_completed' => 88],
+            ['staff_id' => $workerPradeep->id, 'employment_type' => 'salaried', 'hours_worked' => 8.0, 'units_completed' => 88],
+        ], [
+            ['item_id' => $itemsCatalog['raw_chilli']->id, 'source_godown_id' => $godownRaw->id, 'batch_no' => 'BATCH-RAW-CHL-01', 'consumed_quantity' => 50.0, 'unit_cost' => 185.00],
+            ['item_id' => $itemsCatalog['raw_coriander']->id, 'source_godown_id' => $godownRaw->id, 'batch_no' => 'BATCH-RAW-COR-01', 'consumed_quantity' => 30.0, 'unit_cost' => 120.00],
+            ['item_id' => $itemsCatalog['raw_turmeric']->id, 'source_godown_id' => $godownRaw->id, 'batch_no' => 'BATCH-RAW-TUR-01', 'consumed_quantity' => 10.0, 'unit_cost' => 145.00],
+            ['item_id' => $itemsCatalog['raw_pepper']->id, 'source_godown_id' => $godownRaw->id, 'batch_no' => 'BATCH-RAW-PEP-01', 'consumed_quantity' => 5.0, 'unit_cost' => 450.00],
+        ], [
+            ['item_id' => $itemsCatalog['fnd_chicken_100']->id, 'dest_godown_id' => $godownMilling->id, 'batch_number' => 'BAT-KF-CHK-261015', 'produced_quantity' => 88.0, 'unit_cost' => 48.00, 'quality_status' => 'passed'],
+        ], [
+            ['wastage_name' => 'Grinding Sieve Coarse Residue', 'wastage_type' => 'process_loss', 'quantity' => 4.0, 'unit' => 'KG', 'estimated_cost' => 650.0, 'recoverable_quantity' => 2.0, 'reason' => 'Coarse fibrous particles rejected at vibratory sieve'],
+            ['wastage_name' => 'Cyclone Exhaust Micro-Dust', 'wastage_type' => 'process_loss', 'quantity' => 3.0, 'unit' => 'KG', 'estimated_cost' => 480.0, 'recoverable_quantity' => 0.0, 'reason' => 'Fine air suspension during pneumatic transfer'],
+        ]);
+
+        // 2. Part 5 Example: Packing Department Management & Stock Distribution
+        $dailyOpService->createOperation([
+            'company_id' => $company->id,
+            'branch_id' => $branchKochi->id,
+            'department_id' => $deptPkg->id,
+            'operation_number' => 'DOP-KF-20261018-002',
+            'operation_date' => '2026-10-18',
+            'department_head_id' => $leadJoy?->id,
+            'supervisor_id' => $opBiju?->id,
+            'work_order_ref' => 'WO-KF-PCK-02',
+            'process_name' => 'Pouch Packing & Carton Boxing',
+            'work_description' => 'Automated nitrogen-flushed pouch packaging and outer carton boxing of ground powders.',
+            'start_time' => '08:30:00',
+            'end_time' => '17:30:00',
+            'work_status' => 'completed',
+            'approval_status' => 'department_head_approved',
+            'remarks' => '150 kg processed into multi-layer moisture barrier foil pouches and distributed to locations.',
+        ], [
+            ['staff_id' => $leadJoy->id, 'employment_type' => 'salaried', 'hours_worked' => 8.5, 'units_completed' => 900],
+            ['staff_id' => $opBiju->id, 'employment_type' => 'salaried', 'hours_worked' => 8.5, 'units_completed' => 900],
+        ], [
+            ['item_id' => $itemsCatalog['pkg_pouch_100']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-PKG-P100-01', 'consumed_quantity' => 500.0, 'unit_cost' => 1.60],
+            ['item_id' => $itemsCatalog['pkg_pouch_250']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-PKG-P250-01', 'consumed_quantity' => 300.0, 'unit_cost' => 2.40],
+            ['item_id' => $itemsCatalog['pkg_pouch_500']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-PKG-P500-01', 'consumed_quantity' => 100.0, 'unit_cost' => 3.20],
+        ], [
+            ['item_id' => $itemsCatalog['fnd_chicken_100']->id, 'dest_godown_id' => $godownFinished->id, 'batch_number' => 'BAT-KF-PCK-261018', 'produced_quantity' => 900.0, 'unit_cost' => 52.00, 'quality_status' => 'passed'],
+        ], [
+            ['wastage_name' => 'FFS Machine Foil Jam & Misprints', 'wastage_type' => 'packaging_damage', 'quantity' => 12.0, 'unit' => 'PKT', 'estimated_cost' => 28.0, 'recoverable_quantity' => 0.0, 'reason' => 'Roll calibration seal error'],
+        ], [
+            // Exact Distribution Destinations from User Prompt Part 5!
+            ['item_id' => $itemsCatalog['fnd_chicken_100']->id, 'destination_godown_id' => $godownCounter->id, 'destination_type' => 'factory_sales_counter', 'batch_no' => 'BAT-KF-PCK-261018', 'quantity' => 100.0],
+            ['item_id' => $itemsCatalog['fnd_chicken_100']->id, 'destination_godown_id' => $godownFinished->id, 'destination_type' => 'head_office_warehouse', 'batch_no' => 'BAT-KF-PCK-261018', 'quantity' => 300.0],
+            ['item_id' => $itemsCatalog['fnd_chicken_100']->id, 'destination_godown_id' => $godownVan1->id, 'destination_type' => 'delivery_van', 'batch_no' => 'BAT-KF-PCK-261018', 'quantity' => 200.0],
+            ['item_id' => $itemsCatalog['fnd_chicken_100']->id, 'destination_godown_id' => $godownCalicut->id, 'destination_type' => 'branch_warehouse', 'batch_no' => 'BAT-KF-PCK-261018', 'quantity' => 150.0],
+        ]);
 
         // 19. Operating Expenses
         $this->recordExpenseVoucher($company, $branchKochi, $ledgers['rentLedger'], $ledgers['bankLedger'], 140000.00, '2026-09-01', 'September Puthencruz Mill & Processing Facility Lease');

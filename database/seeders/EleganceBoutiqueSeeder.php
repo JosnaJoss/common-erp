@@ -18,10 +18,12 @@ use App\Models\Product;
 use App\Models\Role;
 use App\Models\Route;
 use App\Models\Shift;
+use App\Models\Staff;
 use App\Models\Subcategory;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\DailyOperationService;
 use Illuminate\Support\Facades\Hash;
 
 class EleganceBoutiqueSeeder extends BaseIndustrySeeder
@@ -276,8 +278,27 @@ class EleganceBoutiqueSeeder extends BaseIndustrySeeder
             'description' => 'Pashmina shawls and bandhani silk dupattas', 'status' => 'active',
         ]);
 
+        $catFabrics = Category::firstOrCreate(['company_id' => $company->id, 'name' => 'Textile Raw Materials & Trims'], [
+            'description' => 'Unstitched cotton fabrics, silks, trims and zari', 'status' => 'active',
+        ]);
+        $subFabricRolls = Subcategory::firstOrCreate(['company_id' => $company->id, 'category_id' => $catFabrics->id, 'name' => 'Fabrics & Threads'], [
+            'description' => 'Mulmul cotton, pure linen and metallic zari rolls', 'status' => 'active',
+        ]);
+
         // 9. Products & Items (25 Items across clothing styles, sizes & colours)
         $itemsCatalog = [];
+
+        // Raw Materials
+        $itemsCatalog['raw_cotton_fabric'] = Item::firstOrCreate(['company_id' => $company->id, 'code' => 'ITM-RM-COT-FAB'], [
+            'category_id' => $catFabrics->id, 'subcategory_id' => $subFabricRolls->id, 'unit_id' => $uMtr->id,
+            'name' => 'Pure Mulmul Cotton Unstitched Fabric Roll', 'item_type' => 'raw_material', 'weight' => 0.15,
+            'min_price' => 120.00, 'normal_price' => 160.00, 'max_price' => 200.00, 'gst_percentage' => 5.00, 'hsn_code' => '5208', 'reorder_quantity' => 50, 'status' => 'active',
+        ]);
+        $itemsCatalog['raw_zari_thread'] = Item::firstOrCreate(['company_id' => $company->id, 'code' => 'ITM-RM-ZAR-THR'], [
+            'category_id' => $catFabrics->id, 'subcategory_id' => $subFabricRolls->id, 'unit_id' => $uPcs->id,
+            'name' => 'Gold Metallic Zari Thread Spool (500m)', 'item_type' => 'raw_material', 'weight' => 0.05,
+            'min_price' => 45.00, 'normal_price' => 60.00, 'max_price' => 80.00, 'gst_percentage' => 12.00, 'hsn_code' => '5605', 'reorder_quantity' => 40, 'status' => 'active',
+        ]);
 
         // Cotton Kurtis (Sizes M, L, XL in Pastel Floral and Indigo)
         $pKurtiFloral = Product::firstOrCreate(['company_id' => $company->id, 'code' => 'PRD-KRT-FLR'], [
@@ -667,6 +688,41 @@ class EleganceBoutiqueSeeder extends BaseIndustrySeeder
             $this->processStaffAttendanceAndPayroll($company, $staff, $ledgers);
         }
 
+        // Hierarchy & Piece-rate config
+        $usmanStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-ELG-005')->first();
+        $sohailStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-ELG-012')->first();
+        $natashaStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-ELG-001')->first();
+
+        if ($usmanStaff) {
+            $usmanStaff->update([
+                'role_position' => 'supervisor',
+                'employee_type' => 'piece_rate',
+                'piece_rate' => 250.00,
+            ]);
+            $deptTailor->update([
+                'department_type' => 'cutting',
+                'head_staff_id' => $usmanStaff->id,
+                'supervisor_staff_id' => $usmanStaff->id,
+            ]);
+        }
+        if ($sohailStaff && $usmanStaff) {
+            $sohailStaff->update([
+                'role_position' => 'worker',
+                'employee_type' => 'piece_rate',
+                'piece_rate' => 150.00,
+                'supervisor_id' => $usmanStaff->id,
+            ]);
+        }
+        if ($natashaStaff) {
+            $natashaStaff->update([
+                'role_position' => 'department_head',
+            ]);
+            $deptSales->update([
+                'department_type' => 'sales',
+                'head_staff_id' => $natashaStaff->id,
+            ]);
+        }
+
         // Shifts & Holidays
         Shift::firstOrCreate(['company_id' => $company->id, 'shift_name' => 'Boutique Retail Shift (10am - 8pm)'], [
             'branch_id' => $branchMumbai->id,
@@ -681,7 +737,13 @@ class EleganceBoutiqueSeeder extends BaseIndustrySeeder
 
         // 13. Opening Stock Batches for all 25 items
         foreach ($itemsCatalog as $key => $item) {
-            $qty = str_contains($key, 'lehenga') ? 12 : (str_contains($key, 'saree') ? 25 : 40);
+            if ($key === 'raw_cotton_fabric') {
+                $qty = 500;
+            } elseif ($key === 'raw_zari_thread') {
+                $qty = 200;
+            } else {
+                $qty = str_contains($key, 'lehenga') ? 12 : (str_contains($key, 'saree') ? 25 : 40);
+            }
             $cost = $item->min_price * 0.70;
             $this->recordOpeningStock($company, $branchMumbai, $godownBandraStock, $item, $qty, $cost, 'BATCH-ELG-OPN');
         }
@@ -798,6 +860,70 @@ class EleganceBoutiqueSeeder extends BaseIndustrySeeder
             'source' => 'Walk-in Studio Inquiry',
             'status' => 'Contacted',
             'notes' => 'Custom linen shirts and formal blazers styling enquiry.',
+        ]);
+
+        // 17b. Daily Operations Management (Cutting & Tailoring Production with Van Stocking)
+        $dailyOpService = new DailyOperationService($this->inventoryService);
+        $godownVan = $this->inventoryService->ensureMobileVanGodown($vehicle1);
+
+        // Daily Operation 1: Fabric Cutting & Sorting
+        $dailyOpService->createOperation([
+            'company_id' => $company->id,
+            'branch_id' => $branchMumbai->id,
+            'department_id' => $deptTailor->id,
+            'operation_number' => 'DOP-ELG-20261014-001',
+            'operation_date' => '2026-10-14',
+            'department_head_id' => $usmanStaff?->id,
+            'supervisor_id' => $usmanStaff?->id,
+            'work_order_ref' => 'WO-ELG-CUT-01',
+            'process_name' => 'Fabric Laying, Precision Pattern Cutting & Sorting',
+            'work_description' => 'Manual pattern grading and rotary blade cutting of mulmul cotton rolls for designer festive kurtis.',
+            'start_time' => '09:00:00',
+            'end_time' => '18:00:00',
+            'work_status' => 'completed',
+            'approval_status' => 'department_head_approved',
+            'remarks' => 'Selvage cut clean. Fabric yield efficiency 94.2%.',
+        ], [
+            ['staff_id' => $usmanStaff->id, 'employment_type' => 'piece_rate', 'hours_worked' => 8.0, 'units_completed' => 30, 'piece_rate' => 250.00],
+            ['staff_id' => $sohailStaff->id, 'employment_type' => 'piece_rate', 'hours_worked' => 8.0, 'units_completed' => 30, 'piece_rate' => 150.00],
+        ], [
+            ['item_id' => $itemsCatalog['raw_cotton_fabric']->id, 'source_godown_id' => $godownBandraStock->id, 'batch_no' => 'BATCH-ELG-OPN', 'consumed_quantity' => 80.0, 'unit_cost' => 110.00],
+        ], [
+            ['item_id' => $itemsCatalog['kurti_floral_m']->id, 'dest_godown_id' => $godownBandraStock->id, 'batch_number' => 'BAT-ELG-CUT-261014', 'produced_quantity' => 25.0, 'unit_cost' => 850.00, 'quality_status' => 'passed'],
+        ], [
+            ['wastage_name' => 'End-of-Bolt Selvage & Neckline Trimmings', 'wastage_type' => 'scrap_trimming', 'quantity' => 5.0, 'unit' => 'MTR', 'estimated_cost' => 550.0, 'recoverable_quantity' => 2.0, 'reason' => 'Scraps from curved sleeve and neckline cuts'],
+        ]);
+
+        // Daily Operation 2: Handcrafted Assembly, Zari Embellishment & Van Distribution
+        $dailyOpService->createOperation([
+            'company_id' => $company->id,
+            'branch_id' => $branchMumbai->id,
+            'department_id' => $deptTailor->id,
+            'operation_number' => 'DOP-ELG-20261016-002',
+            'operation_date' => '2026-10-16',
+            'department_head_id' => $usmanStaff?->id,
+            'supervisor_id' => $usmanStaff?->id,
+            'work_order_ref' => 'WO-ELG-ASSEM-02',
+            'process_name' => 'Garment Assembly, Zari Border Work & Quality Finishing',
+            'work_description' => 'Precision stitching, overlocking and zari border attachment for bespoke boutique kurtis.',
+            'start_time' => '09:00:00',
+            'end_time' => '18:30:00',
+            'work_status' => 'completed',
+            'approval_status' => 'department_head_approved',
+            'remarks' => 'Completed units ironed, inspected and tagged for retail display and mobile trunk show van.',
+        ], [
+            ['staff_id' => $usmanStaff->id, 'employment_type' => 'piece_rate', 'hours_worked' => 8.5, 'units_completed' => 20, 'piece_rate' => 250.00],
+            ['staff_id' => $sohailStaff->id, 'employment_type' => 'piece_rate', 'hours_worked' => 8.5, 'units_completed' => 20, 'piece_rate' => 150.00],
+        ], [
+            ['item_id' => $itemsCatalog['raw_cotton_fabric']->id, 'source_godown_id' => $godownBandraStock->id, 'batch_no' => 'BATCH-ELG-OPN', 'consumed_quantity' => 50.0, 'unit_cost' => 110.00],
+            ['item_id' => $itemsCatalog['raw_zari_thread']->id, 'source_godown_id' => $godownBandraStock->id, 'batch_no' => 'BATCH-ELG-OPN', 'consumed_quantity' => 20.0, 'unit_cost' => 45.00],
+        ], [
+            ['item_id' => $itemsCatalog['kurti_indigo_m']->id, 'dest_godown_id' => $godownBandraStock->id, 'batch_number' => 'BAT-ELG-ASY-261016', 'produced_quantity' => 20.0, 'unit_cost' => 950.00, 'quality_status' => 'passed'],
+        ], [
+            ['wastage_name' => 'Broken Thread Ends & Seam Defects', 'wastage_type' => 'scrap_trimming', 'quantity' => 1.2, 'unit' => 'KG', 'estimated_cost' => 120.0, 'recoverable_quantity' => 0.0, 'reason' => 'Tension mis-stitch on high-speed single needle machine'],
+        ], [
+            ['item_id' => $itemsCatalog['kurti_indigo_m']->id, 'destination_godown_id' => $godownBandraStock->id, 'destination_type' => 'head_office_warehouse', 'batch_no' => 'BAT-ELG-ASY-261016', 'quantity' => 12.0],
+            ['item_id' => $itemsCatalog['kurti_indigo_m']->id, 'destination_godown_id' => $godownVan->id, 'destination_type' => 'delivery_van', 'batch_no' => 'BAT-ELG-ASY-261016', 'quantity' => 8.0],
         ]);
 
         // 18. User Accounts

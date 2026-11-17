@@ -36,8 +36,12 @@ class Staff extends Model
         'emergency_contact_relation',
         'emergency_contact_number',
         'designation',
+        'role_position',
+        'supervisor_id',
         'employee_type',
         'salary_amount',
+        'hourly_rate',
+        'piece_rate',
         'date_of_joining',
         'last_working_date',
         'status',
@@ -95,6 +99,21 @@ class Staff extends Model
     public function department()
     {
         return $this->belongsTo(Department::class);
+    }
+
+    public function supervisor()
+    {
+        return $this->belongsTo(Staff::class, 'supervisor_id');
+    }
+
+    public function subordinates()
+    {
+        return $this->hasMany(Staff::class, 'supervisor_id');
+    }
+
+    public function dailyOperationParticipations()
+    {
+        return $this->hasMany(DailyOperationEmployee::class);
     }
 
     public function documents()

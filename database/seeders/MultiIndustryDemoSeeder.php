@@ -19,9 +19,11 @@ class MultiIndustryDemoSeeder extends Seeder
         $this->command->info('------------------------------------------------------------');
 
         $this->call([
+            IndustryTemplatesSeeder::class,
             EleganceBoutiqueSeeder::class,
             KanchinadFoodsSeeder::class,
             AquaFreshBeveragesSeeder::class,
+            CraftFurnitureSeeder::class,
         ]);
 
         $this->command->info('------------------------------------------------------------');

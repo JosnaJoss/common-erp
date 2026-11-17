@@ -167,6 +167,30 @@ class InventoryController extends Controller
         $transferNo = 'TRF-' . date('Ymd') . '-' . rand(1000, 9999);
 
         try {
+            $transferMode = $request->input('mode', 'completed'); // 'completed' or 'pending'
+
+            if ($transferMode === 'pending') {
+                $transfer = StockTransfer::create([
+                    'company_id' => $companyId,
+                    'transfer_no' => $transferNo,
+                    'transfer_date' => $data['transfer_date'],
+                    'source_godown_id' => $data['source_godown_id'],
+                    'dest_godown_id' => $data['dest_godown_id'],
+                    'status' => 'pending',
+                    'remarks' => $data['remarks'] ?? null,
+                    'created_by' => auth()->id(),
+                ]);
+
+                StockTransferItem::create([
+                    'stock_transfer_id' => $transfer->id,
+                    'item_id' => $data['item_id'],
+                    'quantity' => $data['quantity'],
+                ]);
+
+                AuditLog::log('inventory', 'transfer_create', "Initiated pending transfer {$transferNo}");
+                return back()->with('success', "Stock transfer {$transferNo} initiated (Pending Dispatch).");
+            }
+
             $inventoryService = new InventoryService();
             $inventoryService->transferStock(
                 $companyId, $data['source_godown_id'], $data['dest_godown_id'],
@@ -180,6 +204,10 @@ class InventoryController extends Controller
                 'source_godown_id' => $data['source_godown_id'],
                 'dest_godown_id' => $data['dest_godown_id'],
                 'status' => 'completed',
+                'dispatched_by' => auth()->id(),
+                'dispatched_at' => now(),
+                'received_by' => auth()->id(),
+                'received_at' => now(),
                 'remarks' => $data['remarks'] ?? null,
                 'created_by' => auth()->id(),
             ]);
@@ -194,6 +222,30 @@ class InventoryController extends Controller
             return back()->with('success', "Stock transfer {$transferNo} completed successfully.");
         } catch (\Exception $e) {
             return back()->withInput()->withErrors(['quantity' => $e->getMessage()]);
+        }
+    }
+
+    public function transferDispatch(StockTransfer $transfer)
+    {
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->dispatchTransfer($transfer, auth()->id() ?? 1);
+            AuditLog::log('inventory', 'transfer_dispatch', "Dispatched stock transfer {$transfer->transfer_no}");
+            return back()->with('success', "Stock transfer {$transfer->transfer_no} marked In-Transit (Stock deducted from source).");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function transferReceive(StockTransfer $transfer)
+    {
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->receiveTransfer($transfer, auth()->id() ?? 1);
+            AuditLog::log('inventory', 'transfer_receive', "Received and confirmed stock transfer {$transfer->transfer_no}");
+            return back()->with('success', "Stock transfer {$transfer->transfer_no} completed (Stock added to destination).");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
         }
     }
 

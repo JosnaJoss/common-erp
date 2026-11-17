@@ -429,6 +429,22 @@ abstract class BaseIndustrySeeder extends Seeder
                 'OPN-' . $item->code,
                 "Opening Stock for {$item->name}"
             );
+        } elseif ($existing->quantity < $quantity) {
+            $diff = $quantity - $existing->quantity;
+            $this->inventoryService->recordInward(
+                $company->id,
+                $branch->id,
+                $godown->id,
+                $item->id,
+                $diff,
+                $unitCost,
+                $batchNo,
+                $expiryDate,
+                'OpeningStock',
+                null,
+                'OPN-TOPUP-' . $item->code,
+                "Opening Stock topup for {$item->name}"
+            );
         }
     }
 
@@ -1073,7 +1089,7 @@ abstract class BaseIndustrySeeder extends Seeder
             'department_id' => $dept->id,
             'first_name' => $data['first_name'],
             'last_name' => $data['last_name'],
-            'email' => $data['email'],
+            'email' => $data['email'] ?? (strtolower($data['first_name'] . '.' . $data['last_name'] . rand(10, 99)) . '@example.com'),
             'phone' => $data['phone'] ?? '+91 98' . rand(10000000, 99999999),
             'aadhaar_number' => $data['aadhaar_number'] ?? (rand(1000, 9999) . ' ' . rand(1000, 9999) . ' ' . rand(1000, 9999)),
             'pan_number' => $data['pan_number'] ?? ('ABCDE' . rand(1000, 9999) . 'F'),
@@ -1102,6 +1118,10 @@ abstract class BaseIndustrySeeder extends Seeder
             'bank_holder_name' => "{$data['first_name']} {$data['last_name']}",
             'bank_account_number' => '50100' . rand(1000000, 9999999),
             'date_of_joining' => $data['date_of_joining'] ?? '2023-01-10',
+            'role_position' => $data['role_position'] ?? 'staff',
+            'supervisor_id' => $data['supervisor_id'] ?? null,
+            'hourly_rate' => $data['hourly_rate'] ?? 0,
+            'piece_rate' => $data['piece_rate'] ?? 0,
             'status' => 'active',
         ]);
     }

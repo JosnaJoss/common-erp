@@ -13,8 +13,11 @@ class Godown extends Model
     protected $fillable = [
         'company_id',
         'branch_id',
+        'vehicle_id',
+        'department_id',
         'name',
         'code',
+        'location_type',
         'address',
         'postal_code',
         'responsible_staff',
@@ -31,9 +34,34 @@ class Godown extends Model
         return $this->belongsTo(Branch::class);
     }
 
+    public function vehicle()
+    {
+        return $this->belongsTo(Vehicle::class);
+    }
+
+    public function department()
+    {
+        return $this->belongsTo(Department::class);
+    }
+
     public function batches()
     {
         return $this->hasMany(StockBatch::class);
+    }
+
+    public function isMobileVan(): bool
+    {
+        return $this->location_type === 'van_mobile' || !is_null($this->vehicle_id);
+    }
+
+    public function isSalesOutlet(): bool
+    {
+        return $this->location_type === 'sales_outlet';
+    }
+
+    public function isProductionUnit(): bool
+    {
+        return $this->location_type === 'production_unit';
     }
 }
 

@@ -16,10 +16,12 @@ use App\Models\Product;
 use App\Models\Role;
 use App\Models\Route;
 use App\Models\Shift;
+use App\Models\Staff;
 use App\Models\Subcategory;
 use App\Models\Unit;
 use App\Models\User;
 use App\Models\Vehicle;
+use App\Services\DailyOperationService;
 use Illuminate\Support\Facades\Hash;
 
 class AquaFreshBeveragesSeeder extends BaseIndustrySeeder
@@ -606,6 +608,38 @@ class AquaFreshBeveragesSeeder extends BaseIndustrySeeder
             $this->processStaffAttendanceAndPayroll($company, $staff, $ledgers);
         }
 
+        // Hierarchy & Roles config
+        $sanjayStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-AQ-001')->first();
+        $naveenStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-AQ-002')->first();
+        $pramodStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-AQ-004')->first();
+        $harishStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-AQ-011')->first();
+        $rakeshStaff = Staff::where('company_id', $company->id)->where('employee_id', 'EMP-AQ-013')->first();
+
+        if ($sanjayStaff) {
+            $sanjayStaff->update(['role_position' => 'department_head']);
+            $deptRO->update(['department_type' => 'production', 'head_staff_id' => $sanjayStaff->id]);
+        }
+        if ($naveenStaff) {
+            $naveenStaff->update(['role_position' => 'supervisor']);
+            $deptRO->update(['supervisor_staff_id' => $naveenStaff->id]);
+        }
+        if ($pramodStaff) {
+            $pramodStaff->update(['role_position' => 'supervisor']);
+            $deptBottling->update(['department_type' => 'production', 'supervisor_staff_id' => $pramodStaff->id]);
+        }
+        if ($harishStaff) {
+            $harishStaff->update(['role_position' => 'supervisor']);
+            $deptLog->update(['department_type' => 'sales', 'supervisor_staff_id' => $harishStaff->id]);
+        }
+        if ($rakeshStaff && $harishStaff) {
+            $rakeshStaff->update([
+                'role_position' => 'worker',
+                'employee_type' => 'daily_wage',
+                'hourly_rate' => 85.00,
+                'supervisor_id' => $harishStaff->id,
+            ]);
+        }
+
         // Shifts & Holidays
         Shift::firstOrCreate(['company_id' => $company->id, 'shift_name' => 'RO Bottling Shift (07:00 - 15:30)'], [
             'branch_id' => $branchPlant->id, 'start_time' => '07:00:00', 'end_time' => '15:30:00', 'break_duration_minutes' => 45, 'status' => 'active',
@@ -856,6 +890,78 @@ class AquaFreshBeveragesSeeder extends BaseIndustrySeeder
             'source' => 'Direct B2B Tender',
             'status' => 'Contacted',
             'notes' => 'Requirement of 500 x 20L cans weekly with dispenser maintenance.',
+        ]);
+
+        // 20b. Daily Operations Management (Bottling & Can Refill with Mobile Van Delivery)
+        $dailyOpService = new DailyOperationService($this->inventoryService);
+        $godownTruck = $this->inventoryService->ensureMobileVanGodown($vehicle1);
+        $godownVanCan = $this->inventoryService->ensureMobileVanGodown($vehicle2);
+
+        // Daily Operation 1: Automated Bottle Blowing, Filling & Capping
+        $dailyOpService->createOperation([
+            'company_id' => $company->id,
+            'branch_id' => $branchPlant->id,
+            'department_id' => $deptBottling->id,
+            'operation_number' => 'DOP-AQ-20261012-001',
+            'operation_date' => '2026-10-12',
+            'department_head_id' => $sanjayStaff?->id,
+            'supervisor_id' => $pramodStaff?->id,
+            'work_order_ref' => 'WO-AQ-BTL-01',
+            'process_name' => 'High-Speed PET Blow Moulding, Ozonation & Bottling',
+            'work_description' => 'Automated linear 8-cavity blow moulding, rinse, filling with ozonated mineralized water and capper line.',
+            'start_time' => '07:30:00',
+            'end_time' => '16:00:00',
+            'work_status' => 'completed',
+            'approval_status' => 'department_head_approved',
+            'remarks' => 'Microbiological swab and ozone concentration (0.4 ppm) passed line lab inspection.',
+        ], [
+            ['staff_id' => $pramodStaff->id, 'employment_type' => 'salaried', 'hours_worked' => 8.0, 'units_completed' => 980],
+            ['staff_id' => $naveenStaff->id, 'employment_type' => 'salaried', 'hours_worked' => 8.0, 'units_completed' => 980],
+        ], [
+            ['item_id' => $itemsCatalog['preform_32g']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-PRE-32-OPN', 'consumed_quantity' => 1000.0, 'unit_cost' => 2.00],
+            ['item_id' => $itemsCatalog['cap_28mm']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-CAP-28-OPN', 'consumed_quantity' => 1000.0, 'unit_cost' => 0.45],
+            ['item_id' => $itemsCatalog['label_1l']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-LBL-1L-OPN', 'consumed_quantity' => 1000.0, 'unit_cost' => 0.30],
+            ['item_id' => $itemsCatalog['minerals_salt']->id, 'source_godown_id' => $godownRaw->id, 'batch_no' => 'BATCH-MIN-OPN', 'consumed_quantity' => 5.0, 'unit_cost' => 180.00],
+        ], [
+            ['item_id' => $itemsCatalog['fnd_water_1l']->id, 'dest_godown_id' => $godownFinished->id, 'batch_number' => 'BAT-AQ-BTL-261012', 'produced_quantity' => 980.0, 'unit_cost' => 6.50, 'quality_status' => 'passed'],
+        ], [
+            ['wastage_name' => 'Blowing Oven Preform Thermal Distortion', 'wastage_type' => 'process_loss', 'quantity' => 15.0, 'unit' => 'PCS', 'estimated_cost' => 30.0, 'recoverable_quantity' => 15.0, 'reason' => 'Oven mandrel sensor trip during shift changeover'],
+            ['wastage_name' => 'Capper Chuck Thread Jam Caps', 'wastage_type' => 'packaging_damage', 'quantity' => 5.0, 'unit' => 'PCS', 'estimated_cost' => 2.5, 'recoverable_quantity' => 0.0, 'reason' => 'Chuck alignment torque slip'],
+        ], [
+            ['item_id' => $itemsCatalog['fnd_water_1l']->id, 'destination_godown_id' => $godownFinished->id, 'destination_type' => 'head_office_warehouse', 'batch_no' => 'BAT-AQ-BTL-261012', 'quantity' => 600.0],
+            ['item_id' => $itemsCatalog['fnd_water_1l']->id, 'destination_godown_id' => $godownTruck->id, 'destination_type' => 'delivery_van', 'batch_no' => 'BAT-AQ-BTL-261012', 'quantity' => 380.0],
+        ]);
+
+        // Daily Operation 2: 20L Commercial Can Sanitization & Refill
+        $dailyOpService->createOperation([
+            'company_id' => $company->id,
+            'branch_id' => $branchDelhi->id,
+            'department_id' => $deptLog->id,
+            'operation_number' => 'DOP-AQ-20261014-002',
+            'operation_date' => '2026-10-14',
+            'department_head_id' => $sanjayStaff?->id,
+            'supervisor_id' => $harishStaff?->id,
+            'work_order_ref' => 'WO-AQ-CAN-02',
+            'process_name' => 'Ultrasonic Decontamination, Refill & Tamper Evident Sealing',
+            'work_description' => 'Multi-stage caustic soda wash, warm water rinse, ozone sanitize, filling 20L jars and heat shrink neck band seal.',
+            'start_time' => '08:00:00',
+            'end_time' => '17:00:00',
+            'work_status' => 'completed',
+            'approval_status' => 'department_head_approved',
+            'remarks' => '197 clean cans filled and ready for corporate delivery fleet dispatch.',
+        ], [
+            ['staff_id' => $harishStaff->id, 'employment_type' => 'salaried', 'hours_worked' => 8.0, 'units_completed' => 197],
+            ['staff_id' => $rakeshStaff->id, 'employment_type' => 'daily_wage', 'hours_worked' => 8.0, 'units_completed' => 197, 'hourly_rate' => 85.00],
+        ], [
+            ['item_id' => $itemsCatalog['jar_20l_empty']->id, 'source_godown_id' => $godownCans->id, 'batch_no' => 'BATCH-JAR-20L-OPN', 'consumed_quantity' => 200.0, 'unit_cost' => 150.00],
+            ['item_id' => $itemsCatalog['cap_55mm']->id, 'source_godown_id' => $godownPkg->id, 'batch_no' => 'BATCH-CAP-55-OPN', 'consumed_quantity' => 200.0, 'unit_cost' => 2.20],
+        ], [
+            ['item_id' => $itemsCatalog['fnd_can_20l']->id, 'dest_godown_id' => $godownCans->id, 'batch_number' => 'BAT-AQ-CAN-261014', 'produced_quantity' => 197.0, 'unit_cost' => 28.00, 'quality_status' => 'passed'],
+        ], [
+            ['wastage_name' => 'Hairline Neck Fracture Damaged Jars', 'wastage_type' => 'scrap_trimming', 'quantity' => 3.0, 'unit' => 'JAR', 'estimated_cost' => 450.0, 'recoverable_quantity' => 0.0, 'reason' => 'Structural polycarbonate fatigue identified under pressure leak test'],
+        ], [
+            ['item_id' => $itemsCatalog['fnd_can_20l']->id, 'destination_godown_id' => $godownCans->id, 'destination_type' => 'branch_warehouse', 'batch_no' => 'BAT-AQ-CAN-261014', 'quantity' => 117.0],
+            ['item_id' => $itemsCatalog['fnd_can_20l']->id, 'destination_godown_id' => $godownVanCan->id, 'destination_type' => 'delivery_van', 'batch_no' => 'BAT-AQ-CAN-261014', 'quantity' => 80.0],
         ]);
 
         // 21. User Accounts

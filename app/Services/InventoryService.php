@@ -188,5 +188,109 @@ class InventoryService
             );
         });
     }
+
+    /**
+     * Dispatch a stock transfer (deducts stock from source, marks in_transit)
+     */
+    public function dispatchTransfer(\App\Models\StockTransfer $transfer, int $userId): void
+    {
+        DB::transaction(function () use ($transfer, $userId) {
+            if ($transfer->status !== 'pending') {
+                throw new Exception("Only pending transfers can be dispatched.");
+            }
+
+            foreach ($transfer->items as $item) {
+                $batchNo = $item->batch ? $item->batch->batch_no : 'DEFAULT';
+                $this->recordOutward(
+                    $transfer->company_id,
+                    $transfer->source_branch_id,
+                    $transfer->source_godown_id,
+                    $item->item_id,
+                    (float)$item->quantity,
+                    $batchNo,
+                    'StockTransfer',
+                    $transfer->id,
+                    $transfer->transfer_no,
+                    "Dispatched to Godown #{$transfer->dest_godown_id}"
+                );
+            }
+
+            $transfer->update([
+                'status' => 'in_transit',
+                'dispatched_by' => $userId,
+                'dispatched_at' => now(),
+            ]);
+        });
+    }
+
+    /**
+     * Receive / Confirm a stock transfer (inwards stock to destination, marks completed)
+     */
+    public function receiveTransfer(\App\Models\StockTransfer $transfer, int $userId): void
+    {
+        DB::transaction(function () use ($transfer, $userId) {
+            if ($transfer->status === 'completed') {
+                throw new Exception("Transfer is already completed.");
+            }
+
+            // If not yet dispatched, dispatch it first so source stock is cleanly deducted
+            if ($transfer->status === 'pending') {
+                $this->dispatchTransfer($transfer, $userId);
+            }
+
+            foreach ($transfer->items as $item) {
+                $batchNo = $item->batch ? $item->batch->batch_no : 'DEFAULT';
+                $sourceBatch = StockBatch::where('godown_id', $transfer->source_godown_id)
+                    ->where('item_id', $item->item_id)
+                    ->where('batch_no', $batchNo)
+                    ->first();
+                $unitCost = $sourceBatch ? (float)$sourceBatch->cost_price : 0;
+
+                $this->recordInward(
+                    $transfer->company_id,
+                    $transfer->dest_branch_id,
+                    $transfer->dest_godown_id,
+                    $item->item_id,
+                    (float)$item->quantity,
+                    $unitCost,
+                    $batchNo,
+                    $sourceBatch?->expiry_date?->toDateString(),
+                    'StockTransfer',
+                    $transfer->id,
+                    $transfer->transfer_no,
+                    "Received from Godown #{$transfer->source_godown_id}"
+                );
+            }
+
+            $transfer->update([
+                'status' => 'completed',
+                'received_by' => $userId,
+                'received_at' => now(),
+            ]);
+        });
+    }
+
+    /**
+     * Ensure a delivery van has an associated mobile stock godown
+     */
+    public function ensureMobileVanGodown(\App\Models\Vehicle $vehicle): \App\Models\Godown
+    {
+        $code = 'VAN-' . preg_replace('/[^A-Za-z0-9]/', '', strtoupper($vehicle->registration_number));
+        return \App\Models\Godown::firstOrCreate(
+            [
+                'company_id' => $vehicle->company_id,
+                'vehicle_id' => $vehicle->id,
+            ],
+            [
+                'branch_id' => $vehicle->branch_id,
+                'name' => "Mobile Van Stock ({$vehicle->vehicle_name} - {$vehicle->registration_number})",
+                'code' => $code,
+                'location_type' => 'van_mobile',
+                'responsible_staff' => $vehicle->assigned_driver ?? 'Assigned Driver',
+                'address' => 'Mobile Fleet Unit',
+                'status' => 'active',
+            ]
+        );
+    }
 }
 

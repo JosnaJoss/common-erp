@@ -74,5 +74,40 @@ class Company extends Model
     {
         return $this->hasMany(Ledger::class);
     }
+
+    public function dailyOperations()
+    {
+        return $this->hasMany(DailyOperation::class);
+    }
+
+    public function vehicles()
+    {
+        return $this->hasMany(Vehicle::class);
+    }
+
+    public function routes()
+    {
+        return $this->hasMany(Route::class);
+    }
+
+    public function customers()
+    {
+        return $this->hasMany(Customer::class);
+    }
+
+    public function suppliers()
+    {
+        return $this->hasMany(Supplier::class);
+    }
+
+    public function categories()
+    {
+        return $this->hasMany(Category::class);
+    }
+
+    public function subcategories()
+    {
+        return $this->hasMany(Subcategory::class);
+    }
 }
 

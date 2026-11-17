@@ -238,6 +238,20 @@
             </div>
             @endif
 
+            <!-- Daily Operations -->
+            <div class="sidebar-heading">Operations & Production</div>
+            <a class="nav-link-custom d-flex justify-content-between" data-bs-toggle="collapse" href="#operationsSubmenu">
+                <span><i class="bi bi-clock-history"></i> Daily Operations</span>
+                <i class="bi bi-chevron-down small"></i>
+            </a>
+            <div class="collapse {{ request()->is('operations*') ? 'show' : '' }}" id="operationsSubmenu">
+                <div class="sidebar-submenu">
+                    <a href="{{ route('daily_operations.index') }}" class="nav-link-custom {{ request()->routeIs('daily_operations.index', 'daily_operations.show') ? 'active' : '' }}">Daily Work Records</a>
+                    <a href="{{ route('daily_operations.create') }}" class="nav-link-custom {{ request()->routeIs('daily_operations.create') ? 'active' : '' }}">New Activity Entry</a>
+                    <a href="{{ route('reports.daily_operations.index') }}" class="nav-link-custom {{ request()->routeIs('reports.daily_operations.*') ? 'active' : '' }}">Daily Operations Report</a>
+                </div>
+            </div>
+
             <!-- Inventory -->
             @if(\App\Services\CompanyContextService::isModuleEnabled('inventory'))
             <div class="sidebar-heading">Inventory & Warehousing</div>
@@ -318,6 +332,7 @@
             </a>
             <div class="collapse {{ request()->is('reports*') ? 'show' : '' }}" id="reportsSubmenu">
                 <div class="sidebar-submenu">
+                    <a href="{{ route('reports.daily_operations.index') }}" class="nav-link-custom {{ request()->routeIs('reports.daily_operations.*') ? 'active' : '' }}">Daily Operations Report</a>
                     <a href="{{ route('reports.financial.trial_balance') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.trial_balance') ? 'active' : '' }}">Trial Balance</a>
                     <a href="{{ route('reports.financial.profit_and_loss') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.profit_and_loss') ? 'active' : '' }}">Profit & Loss</a>
                     <a href="{{ route('reports.financial.balance_sheet') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.balance_sheet') ? 'active' : '' }}">Balance Sheet</a>
