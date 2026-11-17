@@ -17,6 +17,7 @@ class DatabaseSeeder extends Seeder
             AccountChartSeeder::class,
             MasterDataSeeder::class,
             TransactionSeeder::class,
+            MultiIndustryDemoSeeder::class,
         ]);
     }
 }
