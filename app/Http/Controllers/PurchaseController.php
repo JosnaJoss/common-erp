@@ -317,9 +317,10 @@ class PurchaseController extends Controller
         $companyId = CompanyContextService::getActiveCompanyId();
         $suppliers = Supplier::where('company_id', $companyId)->where('status', 'active')->get();
         $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
-        $items = Item::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->where('status', 'active')->with('unit')->get();
+        $bankLedgers = Ledger::where('company_id', $companyId)->where('is_bank_or_cash', true)->where('status', 'active')->get();
 
-        return view('purchase.entries.create', compact('suppliers', 'godowns', 'items'));
+        return view('purchase.entries.create', compact('suppliers', 'godowns', 'items', 'bankLedgers'));
     }
 
     public function entryStore(Request $request)
@@ -330,7 +331,8 @@ class PurchaseController extends Controller
             'godown_id' => 'required|exists:godowns,id',
             'invoice_number' => 'required|string|max:100',
             'invoice_date' => 'required|date',
-            'payment_type' => 'required|in:Cash,Credit,Bank',
+            'payment_type' => 'required|in:Credit,Cash,Bank,UPI',
+            'discount_amount' => 'nullable|numeric|min:0',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
@@ -338,24 +340,43 @@ class PurchaseController extends Controller
             'items.*.expiry_date' => 'nullable|date',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
+            'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
+            'payment_ledger_id' => 'nullable|required_if:payment_type,Cash,Bank,UPI|exists:ledgers,id',
+            'amount_paid' => 'nullable|numeric|min:0',
+            'transaction_reference' => 'nullable|string|max:100',
         ]);
 
         return DB::transaction(function () use ($companyId, $data) {
+            $billDiscount = (float)($data['discount_amount'] ?? 0);
             $subtotal = 0;
+            $totalItemDiscount = 0;
             $taxTotal = 0;
 
             foreach ($data['items'] as $it) {
-                $lineSub = $it['quantity'] * $it['rate'];
-                $taxRate = $it['tax_percentage'] ?? 0;
-                $lineTax = $lineSub * ($taxRate / 100);
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
 
-                $subtotal += $lineSub;
+                $subtotal += $lineGross;
+                $totalItemDiscount += $lineDisc;
                 $taxTotal += $lineTax;
             }
 
-            $grandTotal = $subtotal + $taxTotal;
+            $totalDiscount = $totalItemDiscount + $billDiscount;
+            $grandTotal = max(0, ($subtotal - $totalDiscount) + $taxTotal);
             $purNo = 'PUR-' . date('Y') . '-' . sprintf('%04d', PurchaseEntry::where('company_id', $companyId)->count() + 1);
+
+            $paidAmount = 0;
+            $paymentType = $data['payment_type'] ?? 'Credit';
+            if ($paymentType !== 'Credit' && !empty($data['payment_ledger_id'])) {
+                $paidAmount = min($grandTotal, (float)($data['amount_paid'] ?? $grandTotal));
+            }
+
+            $balanceAmount = max(0, $grandTotal - $paidAmount);
+            $paymentStatus = $balanceAmount == 0 && $paidAmount > 0 ? 'paid' : ($paidAmount > 0 ? 'partial' : 'unpaid');
 
             $pe = PurchaseEntry::create([
                 'company_id' => $companyId,
@@ -364,14 +385,14 @@ class PurchaseController extends Controller
                 'purchase_number' => $purNo,
                 'invoice_number' => $data['invoice_number'],
                 'invoice_date' => $data['invoice_date'],
-                'payment_type' => $data['payment_type'],
+                'payment_type' => $paymentType,
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxTotal,
-                'discount_amount' => 0,
+                'discount_amount' => $totalDiscount,
                 'grand_total' => $grandTotal,
-                'paid_amount' => 0,
-                'balance_amount' => $grandTotal,
-                'payment_status' => 'unpaid',
+                'paid_amount' => $paidAmount,
+                'balance_amount' => $balanceAmount,
+                'payment_status' => $paymentStatus,
                 'stock_updated' => true,
                 'remarks' => $data['remarks'] ?? null,
                 'created_by' => auth()->id(),
@@ -379,9 +400,11 @@ class PurchaseController extends Controller
 
             $inventoryService = new InventoryService();
             foreach ($data['items'] as $it) {
-                $lineSub = $it['quantity'] * $it['rate'];
-                $taxRate = $it['tax_percentage'] ?? 0;
-                $lineTax = $lineSub * ($taxRate / 100);
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
 
                 PurchaseEntryItem::create([
@@ -393,8 +416,8 @@ class PurchaseController extends Controller
                     'rate' => $it['rate'],
                     'tax_percentage' => $taxRate,
                     'tax_amount' => $lineTax,
-                    'discount_amount' => 0,
-                    'line_total' => $lineSub + $lineTax,
+                    'discount_amount' => $lineDisc,
+                    'line_total' => $taxable + $lineTax,
                 ]);
 
                 // Update stock inward
@@ -412,11 +435,12 @@ class PurchaseController extends Controller
             $supplier = Supplier::find($data['supplier_id']);
 
             if ($supplier && $supplier->ledger) {
+                $netPurchases = max(0, $subtotal - $totalDiscount);
                 $jv = $accountingService->createJournalEntry(
                     $companyId, null, 'Purchase', $data['invoice_date'],
                     "Purchase Invoice {$data['invoice_number']} from {$supplier->name}",
                     [
-                        ['ledger_id' => $purchaseLedger->id, 'debit' => $subtotal, 'credit' => 0, 'narration' => 'Purchase of materials'],
+                        ['ledger_id' => $purchaseLedger->id, 'debit' => $netPurchases, 'credit' => 0, 'narration' => 'Purchase of materials net of discount'],
                         ['ledger_id' => $gstInputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Input GST'],
                         ['ledger_id' => $supplier->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Supplier Bill Payable'],
                     ],
@@ -424,6 +448,39 @@ class PurchaseController extends Controller
                 );
 
                 $pe->update(['journal_entry_id' => $jv->id]);
+
+                // Process immediate payment if selected
+                if ($paidAmount > 0 && !empty($data['payment_ledger_id'])) {
+                    $payNo = 'PAY-' . date('Y') . '-' . sprintf('%04d', SupplierPayment::where('company_id', $companyId)->count() + 1);
+                    $bankLedger = Ledger::find($data['payment_ledger_id']);
+
+                    $sp = SupplierPayment::create([
+                        'company_id' => $companyId,
+                        'supplier_id' => $data['supplier_id'],
+                        'purchase_entry_id' => $pe->id,
+                        'payment_number' => $payNo,
+                        'payment_date' => $data['invoice_date'],
+                        'payment_amount' => $paidAmount,
+                        'payment_mode' => $paymentType === 'Cash' ? 'Cash' : ($paymentType === 'UPI' ? 'UPI' : 'Bank Transfer'),
+                        'payment_ledger_id' => $data['payment_ledger_id'],
+                        'transaction_reference' => $data['transaction_reference'] ?? null,
+                        'remarks' => "Immediate payment at bill entry for Invoice {$data['invoice_number']}",
+                        'created_by' => auth()->id(),
+                    ]);
+
+                    if ($bankLedger) {
+                        $payJv = $accountingService->createJournalEntry(
+                            $companyId, null, 'Payment', $data['invoice_date'],
+                            "Disbursement to {$supplier->name} for Bill {$data['invoice_number']}",
+                            [
+                                ['ledger_id' => $supplier->ledger->id, 'debit' => $paidAmount, 'credit' => 0, 'narration' => "Payment for Bill {$data['invoice_number']}"],
+                                ['ledger_id' => $bankLedger->id, 'debit' => 0, 'credit' => $paidAmount, 'narration' => "Disbursement via {$paymentType}"],
+                            ],
+                            'SupplierPayment', $sp->id, $payNo
+                        );
+                        $sp->update(['journal_entry_id' => $payJv->id]);
+                    }
+                }
             }
 
             AuditLog::log('purchase', 'create_entry', "Recorded Purchase Entry {$purNo} from invoice {$data['invoice_number']}");
@@ -431,10 +488,305 @@ class PurchaseController extends Controller
         });
     }
 
+    public function entryEdit(PurchaseEntry $entry)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($entry->company_id != $companyId) {
+            abort(403);
+        }
+
+        $entry->load(['supplier', 'godown', 'items.item.unit']);
+        $suppliers = Supplier::where('company_id', $companyId)->where('status', 'active')->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->where('status', 'active')->with('unit')->get();
+
+        return view('purchase.entries.edit', compact('entry', 'suppliers', 'godowns', 'items'));
+    }
+
+    public function entryUpdate(Request $request, PurchaseEntry $entry)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($entry->company_id != $companyId) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'supplier_id' => 'required|exists:suppliers,id',
+            'godown_id' => 'required|exists:godowns,id',
+            'invoice_number' => 'required|string|max:100',
+            'invoice_date' => 'required|date',
+            'payment_type' => 'required|in:Credit,Cash,Bank,UPI',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'remarks' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.batch_number' => 'nullable|string|max:50',
+            'items.*.expiry_date' => 'nullable|date',
+            'items.*.quantity' => 'required|numeric|min:0.001',
+            'items.*.rate' => 'required|numeric|min:0',
+            'items.*.discount_amount' => 'nullable|numeric|min:0',
+            'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        return DB::transaction(function () use ($companyId, $entry, $data) {
+            $inventoryService = new InventoryService();
+
+            // 1. Revert previous stock inward for this entry's items
+            foreach ($entry->items as $oldItem) {
+                $inventoryService->revertInward(
+                    $entry->godown_id,
+                    $oldItem->item_id,
+                    (float)$oldItem->quantity,
+                    $oldItem->batch_number ?? 'DEFAULT'
+                );
+            }
+
+            // 2. Compute new totals
+            $billDiscount = (float)($data['discount_amount'] ?? 0);
+            $subtotal = 0;
+            $totalItemDiscount = 0;
+            $taxTotal = 0;
+
+            foreach ($data['items'] as $it) {
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
+
+                $subtotal += $lineGross;
+                $totalItemDiscount += $lineDisc;
+                $taxTotal += $lineTax;
+            }
+
+            $totalDiscount = $totalItemDiscount + $billDiscount;
+            $grandTotal = max(0, ($subtotal - $totalDiscount) + $taxTotal);
+            $paidAmount = (float)$entry->paid_amount;
+            $balanceAmount = max(0, $grandTotal - $paidAmount);
+            $paymentStatus = $balanceAmount == 0 && $paidAmount > 0 ? 'paid' : ($paidAmount > 0 ? 'partial' : 'unpaid');
+
+            // 3. Update existing PurchaseEntry record (preserves ID, purchase_number, created_by)
+            $entry->update([
+                'godown_id' => $data['godown_id'],
+                'supplier_id' => $data['supplier_id'],
+                'invoice_number' => $data['invoice_number'],
+                'invoice_date' => $data['invoice_date'],
+                'payment_type' => $data['payment_type'],
+                'subtotal' => $subtotal,
+                'tax_amount' => $taxTotal,
+                'discount_amount' => $totalDiscount,
+                'grand_total' => $grandTotal,
+                'balance_amount' => $balanceAmount,
+                'payment_status' => $paymentStatus,
+                'remarks' => $data['remarks'] ?? null,
+            ]);
+
+            // 4. Delete old line items and insert new line items
+            $entry->items()->delete();
+
+            foreach ($data['items'] as $it) {
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
+                $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
+
+                PurchaseEntryItem::create([
+                    'purchase_entry_id' => $entry->id,
+                    'item_id' => $it['item_id'],
+                    'batch_number' => $batchNo,
+                    'expiry_date' => $it['expiry_date'] ?? null,
+                    'quantity' => $it['quantity'],
+                    'rate' => $it['rate'],
+                    'tax_percentage' => $taxRate,
+                    'tax_amount' => $lineTax,
+                    'discount_amount' => $lineDisc,
+                    'line_total' => $taxable + $lineTax,
+                ]);
+
+                // Record inward to destination batch
+                $inventoryService->recordInward(
+                    $companyId, null, $data['godown_id'], $it['item_id'],
+                    $it['quantity'], $it['rate'], $batchNo, $it['expiry_date'] ?? null,
+                    'PurchaseEntry', $entry->id, $entry->purchase_number, "Inward for Purchase {$data['invoice_number']} (Updated)"
+                );
+            }
+
+            // 5. Update Double-Entry Accounting
+            $accountingService = new AccountingService();
+            $purchaseLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Purchase Account', 'Direct Expenses & Purchases', 'Expenses');
+            $gstInputLedger = $accountingService->getOrCreateStandardLedger($companyId, 'GST Input Tax Credit (Receivable)', 'Current Assets', 'Assets');
+            $supplier = Supplier::find($data['supplier_id']);
+
+            if ($supplier && $supplier->ledger && $entry->journalEntry) {
+                $netPurchases = max(0, $subtotal - $totalDiscount);
+                $accountingService->updateJournalEntry(
+                    $entry->journalEntry,
+                    $data['invoice_date'],
+                    "Purchase Invoice {$data['invoice_number']} from {$supplier->name} (Updated)",
+                    [
+                        ['ledger_id' => $purchaseLedger->id, 'debit' => $netPurchases, 'credit' => 0, 'narration' => 'Purchase of materials net of discount'],
+                        ['ledger_id' => $gstInputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Input GST'],
+                        ['ledger_id' => $supplier->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Supplier Bill Payable'],
+                    ]
+                );
+            }
+
+            AuditLog::log('purchase', 'update_entry', "Updated Purchase Entry {$entry->purchase_number} from invoice {$data['invoice_number']}");
+            return redirect()->route('purchase.entries.show', $entry)->with('success', "Purchase bill {$entry->purchase_number} updated successfully.");
+        });
+    }
+
     public function entryShow(PurchaseEntry $entry)
     {
-        $entry->load(['supplier', 'godown', 'items.item.unit', 'journalEntry.lines.ledger', 'payments']);
+        $entry->load(['supplier', 'godown', 'items.item.unit', 'journalEntry.lines.ledger', 'payments', 'returns.items.item']);
         return view('purchase.entries.show', compact('entry'));
+    }
+
+    // ==================== PURCHASE RETURNS / DEBIT NOTES ====================
+    public function returns(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = PurchaseReturn::where('company_id', $companyId)->with(['supplier', 'purchaseEntry', 'items.item']);
+
+        if ($request->filled('supplier_id')) {
+            $query->where('supplier_id', $request->get('supplier_id'));
+        }
+
+        $returns = $query->latest('return_date')->paginate(15);
+        $suppliers = Supplier::where('company_id', $companyId)->where('status', 'active')->get();
+
+        return view('purchase.returns.index', compact('returns', 'suppliers'));
+    }
+
+    public function returnCreate(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $suppliers = Supplier::where('company_id', $companyId)->where('status', 'active')->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->where('status', 'active')->with('unit')->get();
+
+        $peId = $request->get('purchase_entry_id');
+        $purchaseEntry = $peId ? PurchaseEntry::where('company_id', $companyId)->with(['items.item.unit', 'supplier'])->find($peId) : null;
+
+        return view('purchase.returns.create', compact('suppliers', 'godowns', 'items', 'purchaseEntry'));
+    }
+
+    public function returnStore(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $data = $request->validate([
+            'supplier_id' => 'required|exists:suppliers,id',
+            'godown_id' => 'required|exists:godowns,id',
+            'purchase_entry_id' => 'nullable|exists:purchase_entries,id',
+            'return_date' => 'required|date',
+            'return_reason' => 'required|string',
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.batch_number' => 'nullable|string|max:50',
+            'items.*.return_quantity' => 'required|numeric|min:0.001',
+            'items.*.rate' => 'required|numeric|min:0',
+            'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        return DB::transaction(function () use ($companyId, $data) {
+            $subtotal = 0;
+            $taxTotal = 0;
+
+            foreach ($data['items'] as $it) {
+                $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $lineSub * ($taxRate / 100);
+
+                $subtotal += $lineSub;
+                $taxTotal += $lineTax;
+            }
+
+            $grandTotal = $subtotal + $taxTotal;
+            $retNo = 'PRT-' . date('Y') . '-' . sprintf('%04d', PurchaseReturn::where('company_id', $companyId)->count() + 1);
+
+            $pr = PurchaseReturn::create([
+                'company_id' => $companyId,
+                'supplier_id' => $data['supplier_id'],
+                'godown_id' => $data['godown_id'],
+                'purchase_entry_id' => $data['purchase_entry_id'] ?? null,
+                'return_number' => $retNo,
+                'return_date' => $data['return_date'],
+                'total_amount' => $grandTotal,
+                'return_reason' => $data['return_reason'],
+                'status' => 'completed',
+                'created_by' => auth()->id(),
+            ]);
+
+            $inventoryService = new InventoryService();
+            foreach ($data['items'] as $it) {
+                $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $lineSub * ($taxRate / 100);
+                $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
+
+                PurchaseReturnItem::create([
+                    'purchase_return_id' => $pr->id,
+                    'item_id' => $it['item_id'],
+                    'batch_number' => $batchNo,
+                    'return_quantity' => $it['return_quantity'],
+                    'rate' => $it['rate'],
+                    'tax_amount' => $lineTax,
+                    'total_amount' => $lineSub + $lineTax,
+                ]);
+
+                // Deduct stock outward for purchase return
+                $inventoryService->recordOutward(
+                    $companyId, null, $data['godown_id'], $it['item_id'],
+                    (float)$it['return_quantity'], $batchNo,
+                    'PurchaseReturn', $pr->id, $retNo,
+                    "Purchase Return {$retNo}: {$data['return_reason']}"
+                );
+            }
+
+            // Post Debit Note Journal Entry
+            $accountingService = new AccountingService();
+            $purchaseReturnLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Purchase Returns & Allowances', 'Direct Expenses & Purchases', 'Expenses');
+            $gstInputLedger = $accountingService->getOrCreateStandardLedger($companyId, 'GST Input Tax Credit (Receivable)', 'Current Assets', 'Assets');
+            $supplier = Supplier::find($data['supplier_id']);
+
+            if ($supplier && $supplier->ledger) {
+                $jv = $accountingService->createJournalEntry(
+                    $companyId, null, 'Purchase Return', $data['return_date'],
+                    "Debit Note {$retNo} to {$supplier->name}: {$data['return_reason']}",
+                    [
+                        ['ledger_id' => $supplier->ledger->id, 'debit' => $grandTotal, 'credit' => 0, 'narration' => 'Debit Note - Return to Supplier'],
+                        ['ledger_id' => $purchaseReturnLedger->id, 'debit' => 0, 'credit' => $subtotal, 'narration' => 'Purchase Return Credit'],
+                        ['ledger_id' => $gstInputLedger->id, 'debit' => 0, 'credit' => $taxTotal, 'narration' => 'Reverse Input GST Credit'],
+                    ],
+                    'PurchaseReturn', $pr->id, $retNo
+                );
+
+                $pr->update(['journal_entry_id' => $jv->id]);
+
+                // If linked to a purchase bill, optionally reduce balance
+                if (!empty($data['purchase_entry_id'])) {
+                    $pe = PurchaseEntry::find($data['purchase_entry_id']);
+                    if ($pe && $pe->balance_amount > 0) {
+                        $pe->balance_amount = max(0, $pe->balance_amount - $grandTotal);
+                        if ($pe->balance_amount == 0 && $pe->paid_amount > 0) {
+                            $pe->payment_status = 'paid';
+                        }
+                        $pe->save();
+                    }
+                }
+            }
+
+            AuditLog::log('purchase', 'create_return', "Created Purchase Return {$retNo} to Supplier #{$data['supplier_id']}");
+            return redirect()->route('purchase.returns.show', $pr)->with('success', "Debit Note {$retNo} issued, stock outward deducted, and supplier ledger debited.");
+        });
+    }
+
+    public function returnShow(PurchaseReturn $return)
+    {
+        $return->load(['supplier', 'godown', 'purchaseEntry', 'items.item.unit', 'journalEntry.lines.ledger']);
+        return view('purchase.returns.show', compact('return'));
     }
 
     // ==================== SUPPLIER PAYMENTS ====================

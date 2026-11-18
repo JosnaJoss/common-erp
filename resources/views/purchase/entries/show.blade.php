@@ -14,6 +14,12 @@
         </span>
     </div>
     <div class="d-flex gap-2">
+        <a href="{{ route('purchase.entries.edit', $entry) }}" class="btn btn-outline-primary">
+            <i class="bi bi-pencil me-1"></i> Edit Bill
+        </a>
+        <a href="{{ route('purchase.returns.create', ['purchase_entry_id' => $entry->id]) }}" class="btn btn-outline-danger">
+            <i class="bi bi-arrow-return-left me-1"></i> Return / Debit Note
+        </a>
         <button onclick="window.print()" class="btn btn-outline-dark">
             <i class="bi bi-printer me-1"></i> Print Bill
         </button>
@@ -101,15 +107,21 @@
             </tbody>
             <tfoot class="bg-light">
                 <tr>
-                    <td colspan="5" class="text-end fw-bold">Subtotal:</td>
+                    <td colspan="5" class="text-end fw-bold">Subtotal Gross:</td>
                     <td class="text-end fw-bold">₹ {{ number_format($entry->subtotal, 2) }}</td>
                 </tr>
+                @if($entry->discount_amount > 0)
+                <tr>
+                    <td colspan="5" class="text-end text-danger fw-bold">Total Discounts:</td>
+                    <td class="text-end text-danger fw-bold">-₹ {{ number_format($entry->discount_amount, 2) }}</td>
+                </tr>
+                @endif
                 <tr>
                     <td colspan="5" class="text-end fw-bold">Input GST (Tax):</td>
                     <td class="text-end fw-bold">₹ {{ number_format($entry->tax_amount, 2) }}</td>
                 </tr>
                 <tr class="table-primary">
-                    <td colspan="5" class="text-end fw-bold fs-6">Grand Total:</td>
+                    <td colspan="5" class="text-end fw-bold fs-6">Grand Total Payable:</td>
                     <td class="text-end fw-bold fs-6 text-primary">₹ {{ number_format($entry->grand_total, 2) }}</td>
                 </tr>
                 <tr>
@@ -123,6 +135,38 @@
             </tfoot>
         </table>
     </div>
+
+    @if($entry->returns && $entry->returns->count())
+    <div class="mt-4 p-3 border rounded bg-light">
+        <h6 class="fw-bold text-danger mb-2"><i class="bi bi-arrow-return-left me-1"></i> Associated Debit Notes / Purchase Returns</h6>
+        <div class="table-responsive">
+            <table class="table table-sm table-bordered bg-white mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Debit Note #</th>
+                        <th>Return Date</th>
+                        <th>Reason</th>
+                        <th class="text-end">Total Amount</th>
+                        <th class="text-center">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($entry->returns as $ret)
+                    <tr>
+                        <td><strong>{{ $ret->return_number }}</strong></td>
+                        <td>{{ $ret->return_date->format('d M Y') }}</td>
+                        <td>{{ $ret->return_reason }}</td>
+                        <td class="text-end fw-bold text-danger">₹ {{ number_format($ret->total_amount, 2) }}</td>
+                        <td class="text-center">
+                            <a href="{{ route('purchase.returns.show', $ret) }}" class="btn btn-xs btn-outline-primary py-0 px-2">View</a>
+                        </td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </div>
+    @endif
 
     <!-- Signatures -->
     <div class="row mt-5 pt-4 text-center">

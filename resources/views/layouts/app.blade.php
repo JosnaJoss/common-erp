@@ -267,6 +267,7 @@
                     <a href="{{ route('inventory.outward.create') }}" class="nav-link-custom {{ request()->routeIs('inventory.outward.*') ? 'active' : '' }}">Stock Outward</a>
                     <a href="{{ route('inventory.transfers') }}" class="nav-link-custom {{ request()->routeIs('inventory.transfers*') ? 'active' : '' }}">Godown Transfers</a>
                     <a href="{{ route('inventory.adjustments') }}" class="nav-link-custom {{ request()->routeIs('inventory.adjustments*') ? 'active' : '' }}">Stock Adjustments</a>
+                    <a href="{{ route('inventory.opening_stock.index') }}" class="nav-link-custom {{ request()->routeIs('inventory.opening_stock.*') ? 'active' : '' }}">Bulk Opening Stock</a>
                     <a href="{{ route('inventory.alerts') }}" class="nav-link-custom {{ request()->routeIs('inventory.alerts*') ? 'active' : '' }}">Low Stock Alerts</a>
                 </div>
             </div>
@@ -285,6 +286,7 @@
                     <a href="{{ route('purchase.orders.index') }}" class="nav-link-custom {{ request()->routeIs('purchase.orders.*') ? 'active' : '' }}">Purchase Orders (PO)</a>
                     <a href="{{ route('purchase.grns.index') }}" class="nav-link-custom {{ request()->routeIs('purchase.grns.*') ? 'active' : '' }}">Goods Receipts (GRN)</a>
                     <a href="{{ route('purchase.entries.index') }}" class="nav-link-custom {{ request()->routeIs('purchase.entries.*') ? 'active' : '' }}">Purchase Bills / Inward</a>
+                    <a href="{{ route('purchase.returns.index') }}" class="nav-link-custom {{ request()->routeIs('purchase.returns.*') ? 'active' : '' }}">Purchase Returns / Debit Notes</a>
                     <a href="{{ route('purchase.payments.index') }}" class="nav-link-custom {{ request()->routeIs('purchase.payments.*') ? 'active' : '' }}">Supplier Payments</a>
                 </div>
             </div>
@@ -301,6 +303,7 @@
                 <div class="sidebar-submenu">
                     <a href="{{ route('sales.orders.index') }}" class="nav-link-custom {{ request()->routeIs('sales.orders.*') ? 'active' : '' }}">Sales Orders (SO)</a>
                     <a href="{{ route('sales.invoices.index') }}" class="nav-link-custom {{ request()->routeIs('sales.invoices.*') ? 'active' : '' }}">Sales Invoices</a>
+                    <a href="{{ route('sales.returns.index') }}" class="nav-link-custom {{ request()->routeIs('sales.returns.*') ? 'active' : '' }}">Sales Returns / Credit Notes</a>
                     <a href="{{ route('sales.deliveries.index') }}" class="nav-link-custom {{ request()->routeIs('sales.deliveries.*') ? 'active' : '' }}">Dispatch & Route Delivery</a>
                     <a href="{{ route('sales.collections.index') }}" class="nav-link-custom {{ request()->routeIs('sales.collections.*') ? 'active' : '' }}">Customer Collections</a>
                 </div>

@@ -30,9 +30,12 @@
                 <button type="submit" class="btn btn-sm btn-primary flex-grow-1"><i class="bi bi-filter me-1"></i> Filter</button>
                 <a href="{{ route('purchase.entries.index') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
             </div>
-            <div class="col-md-3 text-end">
+            <div class="col-md-3 text-end d-flex gap-2 justify-content-end">
+                <a href="{{ route('purchase.returns.index') }}" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-arrow-return-left me-1"></i> Debit Notes
+                </a>
                 <a href="{{ route('purchase.payments.index') }}" class="btn btn-sm btn-outline-success">
-                    <i class="bi bi-cash-stack me-1"></i> Supplier Payments
+                    <i class="bi bi-cash-stack me-1"></i> Payments
                 </a>
             </div>
         </form>
@@ -93,9 +96,12 @@
                                     <span class="text-muted">-</span>
                                 @endif
                             </td>
-                            <td class="text-center">
-                                <a href="{{ route('purchase.entries.show', $entry) }}" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-eye me-1"></i> View
+                            <td class="text-center text-nowrap">
+                                <a href="{{ route('purchase.entries.show', $entry) }}" class="btn btn-sm btn-outline-primary me-1" title="View Bill">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <a href="{{ route('purchase.entries.edit', $entry) }}" class="btn btn-sm btn-outline-secondary" title="Edit Bill">
+                                    <i class="bi bi-pencil"></i>
                                 </a>
                             </td>
                         </tr>

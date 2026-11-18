@@ -14,6 +14,12 @@
         </span>
     </div>
     <div class="d-flex gap-2">
+        <a href="{{ route('sales.invoices.edit', $invoice) }}" class="btn btn-outline-primary">
+            <i class="bi bi-pencil me-1"></i> Edit Invoice
+        </a>
+        <a href="{{ route('sales.returns.create', ['sales_invoice_id' => $invoice->id]) }}" class="btn btn-outline-danger">
+            <i class="bi bi-arrow-return-left me-1"></i> Credit Note / Return
+        </a>
         <a href="{{ route('sales.invoices.print', $invoice) }}" target="_blank" class="btn btn-outline-dark">
             <i class="bi bi-printer me-1"></i> Official Print View
         </a>
@@ -101,9 +107,15 @@
             </tbody>
             <tfoot class="bg-light">
                 <tr>
-                    <td colspan="5" class="text-end fw-bold">Taxable Subtotal:</td>
+                    <td colspan="5" class="text-end fw-bold">Subtotal Gross:</td>
                     <td class="text-end fw-bold">₹ {{ number_format($invoice->subtotal, 2) }}</td>
                 </tr>
+                @if($invoice->discount_amount > 0)
+                <tr>
+                    <td colspan="5" class="text-end text-danger fw-bold">Total Discounts:</td>
+                    <td class="text-end text-danger fw-bold">-₹ {{ number_format($invoice->discount_amount, 2) }}</td>
+                </tr>
+                @endif
                 <tr>
                     <td colspan="5" class="text-end fw-bold">Output GST Liability:</td>
                     <td class="text-end fw-bold">₹ {{ number_format($invoice->tax_amount, 2) }}</td>
@@ -123,6 +135,43 @@
             </tfoot>
         </table>
     </div>
+
+    <!-- Linked Sales Returns / Credit Notes -->
+    @if($invoice->returns && $invoice->returns->count())
+        <div class="card border mb-4">
+            <div class="card-header bg-light py-2">
+                <h6 class="mb-0 fw-bold text-danger"><i class="bi bi-arrow-return-left me-1"></i> Issued Credit Notes / Returns</h6>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Credit Note #</th>
+                            <th>Date</th>
+                            <th>Condition</th>
+                            <th>Reason</th>
+                            <th class="text-end">Amount</th>
+                            <th class="text-center">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach($invoice->returns as $ret)
+                            <tr>
+                                <td><strong>{{ $ret->return_number }}</strong></td>
+                                <td>{{ $ret->return_date->format('d M Y') }}</td>
+                                <td><span class="badge bg-{{ $ret->stock_condition === 'accept_to_stock' ? 'success' : 'warning text-dark' }}">{{ str_replace('_', ' ', $ret->stock_condition) }}</span></td>
+                                <td>{{ $ret->return_reason }}</td>
+                                <td class="text-end fw-bold text-danger">₹ {{ number_format($ret->total_amount, 2) }}</td>
+                                <td class="text-center">
+                                    <a href="{{ route('sales.returns.show', $ret) }}" class="btn btn-xs btn-outline-primary py-0 px-2">View</a>
+                                </td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
 
     <!-- Collections Log if any -->
     @if($invoice->collections && $invoice->collections->count())

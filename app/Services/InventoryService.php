@@ -292,5 +292,37 @@ class InventoryService
             ]
         );
     }
+
+    /**
+     * Revert inward stock quantity (e.g. when editing a purchase bill)
+     */
+    public function revertInward(int $godownId, int $itemId, float $quantity, string $batchNo = 'DEFAULT'): void
+    {
+        $batch = StockBatch::where('godown_id', $godownId)
+            ->where('item_id', $itemId)
+            ->where('batch_no', $batchNo ?: 'DEFAULT')
+            ->first();
+
+        if ($batch) {
+            $batch->quantity = max(0, (float)$batch->quantity - $quantity);
+            $batch->save();
+        }
+    }
+
+    /**
+     * Revert outward stock quantity (e.g. when editing a sales invoice)
+     */
+    public function revertOutward(int $godownId, int $itemId, float $quantity, string $batchNo = 'DEFAULT'): void
+    {
+        $batch = StockBatch::where('godown_id', $godownId)
+            ->where('item_id', $itemId)
+            ->where('batch_no', $batchNo ?: 'DEFAULT')
+            ->first();
+
+        if ($batch) {
+            $batch->quantity = (float)$batch->quantity + $quantity;
+            $batch->save();
+        }
+    }
 }
 

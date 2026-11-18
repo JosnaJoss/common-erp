@@ -151,9 +151,10 @@ class SalesController extends Controller
 
         $customers = Customer::where('company_id', $companyId)->where('status', 'active')->get();
         $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
-        $items = Item::where('company_id', $companyId)->whereIn('item_type', ['sales_item', 'both'])->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->whereIn('item_type', ['sales_item', 'both'])->where('status', 'active')->with('unit')->get();
+        $bankLedgers = Ledger::where('company_id', $companyId)->where('is_bank_or_cash', true)->where('status', 'active')->get();
 
-        return view('sales.invoices.create', compact('so', 'customers', 'godowns', 'items'));
+        return view('sales.invoices.create', compact('so', 'customers', 'godowns', 'items', 'bankLedgers'));
     }
 
     public function invoiceStore(Request $request)
@@ -166,30 +167,51 @@ class SalesController extends Controller
             'invoice_date' => 'required|date',
             'payment_terms' => 'nullable|string|max:100',
             'due_date' => 'nullable|date',
+            'payment_mode' => 'required|in:Credit,Cash,Bank Transfer,UPI,Cheque',
+            'discount_amount' => 'nullable|numeric|min:0',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
+            'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
+            'receipt_ledger_id' => 'nullable|required_if:payment_mode,Cash,Bank Transfer,UPI,Cheque|exists:ledgers,id',
+            'amount_collected' => 'nullable|numeric|min:0',
+            'transaction_reference' => 'nullable|string|max:100',
         ]);
 
         return DB::transaction(function () use ($companyId, $data) {
+            $billDiscount = (float)($data['discount_amount'] ?? 0);
             $subtotal = 0;
+            $totalItemDiscount = 0;
             $taxTotal = 0;
 
             foreach ($data['items'] as $it) {
-                $lineSub = $it['quantity'] * $it['rate'];
-                $taxRate = $it['tax_percentage'] ?? 0;
-                $lineTax = $lineSub * ($taxRate / 100);
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
 
-                $subtotal += $lineSub;
+                $subtotal += $lineGross;
+                $totalItemDiscount += $lineDisc;
                 $taxTotal += $lineTax;
             }
 
-            $grandTotal = $subtotal + $taxTotal;
+            $totalDiscount = $totalItemDiscount + $billDiscount;
+            $grandTotal = max(0, ($subtotal - $totalDiscount) + $taxTotal);
             $invNo = 'INV-' . date('Y') . '-' . sprintf('%04d', SalesInvoice::where('company_id', $companyId)->count() + 1);
+
+            $paidAmount = 0;
+            $paymentMode = $data['payment_mode'] ?? 'Credit';
+            if ($paymentMode !== 'Credit' && !empty($data['receipt_ledger_id'])) {
+                $paidAmount = min($grandTotal, (float)($data['amount_collected'] ?? $grandTotal));
+            }
+
+            $balanceAmount = max(0, $grandTotal - $paidAmount);
+            $paymentStatus = $balanceAmount == 0 && $paidAmount > 0 ? 'paid' : ($paidAmount > 0 ? 'partial' : 'unpaid');
 
             $invoice = SalesInvoice::create([
                 'company_id' => $companyId,
@@ -198,15 +220,15 @@ class SalesController extends Controller
                 'sales_order_id' => $data['sales_order_id'] ?? null,
                 'invoice_number' => $invNo,
                 'invoice_date' => $data['invoice_date'],
-                'payment_terms' => $data['payment_terms'] ?? 'Immediate',
+                'payment_terms' => $data['payment_terms'] ?? ($paymentMode === 'Credit' ? 'Net 30 Days' : 'Immediate (' . $paymentMode . ')'),
                 'due_date' => $data['due_date'] ?? null,
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxTotal,
-                'discount_amount' => 0,
+                'discount_amount' => $totalDiscount,
                 'grand_total' => $grandTotal,
-                'paid_amount' => 0,
-                'balance_amount' => $grandTotal,
-                'payment_status' => 'unpaid',
+                'paid_amount' => $paidAmount,
+                'balance_amount' => $balanceAmount,
+                'payment_status' => $paymentStatus,
                 'stock_updated' => true,
                 'remarks' => $data['remarks'] ?? null,
                 'created_by' => auth()->id(),
@@ -215,9 +237,11 @@ class SalesController extends Controller
             $inventoryService = new InventoryService();
 
             foreach ($data['items'] as $it) {
-                $lineSub = $it['quantity'] * $it['rate'];
-                $taxRate = $it['tax_percentage'] ?? 0;
-                $lineTax = $lineSub * ($taxRate / 100);
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
 
                 SalesInvoiceItem::create([
@@ -228,14 +252,14 @@ class SalesController extends Controller
                     'rate' => $it['rate'],
                     'tax_percentage' => $taxRate,
                     'tax_amount' => $lineTax,
-                    'discount_amount' => 0,
-                    'line_total' => $lineSub + $lineTax,
+                    'discount_amount' => $lineDisc,
+                    'line_total' => $taxable + $lineTax,
                 ]);
 
                 // Update stock outward
                 $inventoryService->recordOutward(
                     $companyId, null, $data['godown_id'], $it['item_id'],
-                    $it['quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invNo,
+                    (float)$it['quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invNo,
                     "Dispatched on Invoice {$invNo}"
                 );
             }
@@ -247,18 +271,53 @@ class SalesController extends Controller
             $customer = Customer::find($data['customer_id']);
 
             if ($customer && $customer->ledger) {
+                $netSales = max(0, $subtotal - $totalDiscount);
                 $jv = $accountingService->createJournalEntry(
                     $companyId, null, 'Sales', $data['invoice_date'],
                     "Sales Invoice {$invNo} to {$customer->name}",
                     [
                         ['ledger_id' => $customer->ledger->id, 'debit' => $grandTotal, 'credit' => 0, 'narration' => 'Receivable from Customer'],
-                        ['ledger_id' => $salesLedger->id, 'debit' => 0, 'credit' => $subtotal, 'narration' => 'Sales Revenue'],
+                        ['ledger_id' => $salesLedger->id, 'debit' => 0, 'credit' => $netSales, 'narration' => 'Sales Revenue net of discounts'],
                         ['ledger_id' => $gstOutputLedger->id, 'debit' => 0, 'credit' => $taxTotal, 'narration' => 'Output GST Payable'],
                     ],
                     'SalesInvoice', $invoice->id, $invNo
                 );
 
                 $invoice->update(['journal_entry_id' => $jv->id]);
+
+                // Record immediate payment collection if cash/bank/upi
+                if ($paidAmount > 0 && !empty($data['receipt_ledger_id'])) {
+                    $colNo = 'COL-' . date('Y') . '-' . sprintf('%04d', CustomerCollection::where('company_id', $companyId)->count() + 1);
+                    $receiptLedger = Ledger::find($data['receipt_ledger_id']);
+
+                    $collection = CustomerCollection::create([
+                        'company_id' => $companyId,
+                        'customer_id' => $data['customer_id'],
+                        'sales_invoice_id' => $invoice->id,
+                        'collection_number' => $colNo,
+                        'collection_date' => $data['invoice_date'],
+                        'collection_amount' => $paidAmount,
+                        'payment_mode' => $paymentMode,
+                        'receipt_ledger_id' => $data['receipt_ledger_id'],
+                        'transaction_reference' => $data['transaction_reference'] ?? null,
+                        'collected_by' => auth()->user()->name ?? 'Counter Staff',
+                        'remarks' => "Immediate counter collection for Invoice {$invNo}",
+                        'created_by' => auth()->id(),
+                    ]);
+
+                    if ($receiptLedger) {
+                        $receiptJv = $accountingService->createJournalEntry(
+                            $companyId, null, 'Receipt', $data['invoice_date'],
+                            "Counter collection from {$customer->name} for Invoice {$invNo}",
+                            [
+                                ['ledger_id' => $receiptLedger->id, 'debit' => $paidAmount, 'credit' => 0, 'narration' => "Receipt via {$paymentMode}"],
+                                ['ledger_id' => $customer->ledger->id, 'debit' => 0, 'credit' => $paidAmount, 'narration' => "Settlement of Invoice {$invNo}"],
+                            ],
+                            'CustomerCollection', $collection->id, $colNo
+                        );
+                        $collection->update(['journal_entry_id' => $receiptJv->id]);
+                    }
+                }
             }
 
             if (!empty($data['sales_order_id'])) {
@@ -266,14 +325,311 @@ class SalesController extends Controller
             }
 
             AuditLog::log('sales', 'create_invoice', "Created Sales Invoice {$invNo}");
-            return redirect()->route('sales.invoices.show', $invoice)->with('success', "Invoice {$invNo} issued, stock outward deducted, and ledger updated.");
+            return redirect()->route('sales.invoices.show', $invoice)->with('success', "Invoice {$invNo} issued, stock outward deducted, and accounts posted.");
+        });
+    }
+
+    public function invoiceEdit(SalesInvoice $invoice)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($invoice->company_id != $companyId) {
+            abort(403);
+        }
+
+        $invoice->load(['customer', 'godown', 'items.item.unit']);
+        $customers = Customer::where('company_id', $companyId)->where('status', 'active')->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->whereIn('item_type', ['sales_item', 'both'])->where('status', 'active')->with('unit')->get();
+
+        return view('sales.invoices.edit', compact('invoice', 'customers', 'godowns', 'items'));
+    }
+
+    public function invoiceUpdate(Request $request, SalesInvoice $invoice)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($invoice->company_id != $companyId) {
+            abort(403);
+        }
+
+        $data = $request->validate([
+            'customer_id' => 'required|exists:customers,id',
+            'godown_id' => 'required|exists:godowns,id',
+            'invoice_date' => 'required|date',
+            'payment_terms' => 'nullable|string|max:100',
+            'due_date' => 'nullable|date',
+            'discount_amount' => 'nullable|numeric|min:0',
+            'remarks' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.batch_number' => 'nullable|string|max:50',
+            'items.*.quantity' => 'required|numeric|min:0.001',
+            'items.*.rate' => 'required|numeric|min:0',
+            'items.*.discount_amount' => 'nullable|numeric|min:0',
+            'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        return DB::transaction(function () use ($companyId, $invoice, $data) {
+            $inventoryService = new InventoryService();
+
+            // 1. Revert previous outward quantities back to stock batches
+            foreach ($invoice->items as $oldItem) {
+                $inventoryService->revertOutward(
+                    $invoice->godown_id,
+                    $oldItem->item_id,
+                    (float)$oldItem->quantity,
+                    $oldItem->batch_number ?? 'DEFAULT'
+                );
+            }
+
+            // 2. Compute new totals
+            $billDiscount = (float)($data['discount_amount'] ?? 0);
+            $subtotal = 0;
+            $totalItemDiscount = 0;
+            $taxTotal = 0;
+
+            foreach ($data['items'] as $it) {
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
+
+                $subtotal += $lineGross;
+                $totalItemDiscount += $lineDisc;
+                $taxTotal += $lineTax;
+            }
+
+            $totalDiscount = $totalItemDiscount + $billDiscount;
+            $grandTotal = max(0, ($subtotal - $totalDiscount) + $taxTotal);
+            $paidAmount = (float)$invoice->paid_amount;
+            $balanceAmount = max(0, $grandTotal - $paidAmount);
+            $paymentStatus = $balanceAmount == 0 && $paidAmount > 0 ? 'paid' : ($paidAmount > 0 ? 'partial' : 'unpaid');
+
+            // 3. Update existing SalesInvoice record
+            $invoice->update([
+                'godown_id' => $data['godown_id'],
+                'customer_id' => $data['customer_id'],
+                'invoice_date' => $data['invoice_date'],
+                'payment_terms' => $data['payment_terms'] ?? $invoice->payment_terms,
+                'due_date' => $data['due_date'] ?? null,
+                'subtotal' => $subtotal,
+                'tax_amount' => $taxTotal,
+                'discount_amount' => $totalDiscount,
+                'grand_total' => $grandTotal,
+                'balance_amount' => $balanceAmount,
+                'payment_status' => $paymentStatus,
+                'remarks' => $data['remarks'] ?? null,
+            ]);
+
+            // 4. Delete old line items and insert new line items
+            $invoice->items()->delete();
+
+            foreach ($data['items'] as $it) {
+                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
+                $lineDisc = (float)($it['discount_amount'] ?? 0);
+                $taxable = max(0, $lineGross - $lineDisc);
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $taxable * ($taxRate / 100);
+                $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
+
+                SalesInvoiceItem::create([
+                    'sales_invoice_id' => $invoice->id,
+                    'item_id' => $it['item_id'],
+                    'batch_number' => $batchNo,
+                    'quantity' => $it['quantity'],
+                    'rate' => $it['rate'],
+                    'tax_percentage' => $taxRate,
+                    'tax_amount' => $lineTax,
+                    'discount_amount' => $lineDisc,
+                    'line_total' => $taxable + $lineTax,
+                ]);
+
+                // Deduct updated outward stock
+                $inventoryService->recordOutward(
+                    $companyId, null, $data['godown_id'], $it['item_id'],
+                    (float)$it['quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invoice->invoice_number,
+                    "Dispatched on Invoice {$invoice->invoice_number} (Updated)"
+                );
+            }
+
+            // 5. Update Double-Entry Accounting
+            $accountingService = new AccountingService();
+            $salesLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Sales Account', 'Sales & Operating Revenue', 'Revenue');
+            $gstOutputLedger = $accountingService->getOrCreateStandardLedger($companyId, 'GST Output Tax Liability (Payable)', 'Duties & Taxes', 'Liabilities');
+            $customer = Customer::find($data['customer_id']);
+
+            if ($customer && $customer->ledger && $invoice->journalEntry) {
+                $netSales = max(0, $subtotal - $totalDiscount);
+                $accountingService->updateJournalEntry(
+                    $invoice->journalEntry,
+                    $data['invoice_date'],
+                    "Sales Invoice {$invoice->invoice_number} to {$customer->name} (Updated)",
+                    [
+                        ['ledger_id' => $customer->ledger->id, 'debit' => $grandTotal, 'credit' => 0, 'narration' => 'Receivable from Customer'],
+                        ['ledger_id' => $salesLedger->id, 'debit' => 0, 'credit' => $netSales, 'narration' => 'Sales Revenue net of discounts'],
+                        ['ledger_id' => $gstOutputLedger->id, 'debit' => 0, 'credit' => $taxTotal, 'narration' => 'Output GST Payable'],
+                    ]
+                );
+            }
+
+            AuditLog::log('sales', 'update_invoice', "Updated Sales Invoice {$invoice->invoice_number}");
+            return redirect()->route('sales.invoices.show', $invoice)->with('success', "Sales invoice {$invoice->invoice_number} updated successfully.");
         });
     }
 
     public function invoiceShow(SalesInvoice $invoice)
     {
-        $invoice->load(['customer', 'godown', 'items.item.unit', 'journalEntry.lines.ledger', 'collections', 'company']);
+        $invoice->load(['customer', 'godown', 'items.item.unit', 'journalEntry.lines.ledger', 'collections', 'company', 'returns.items.item']);
         return view('sales.invoices.show', compact('invoice'));
+    }
+
+    // ==================== SALES RETURNS / CREDIT NOTES ====================
+    public function returns(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = SalesReturn::where('company_id', $companyId)->with(['customer', 'invoice', 'godown', 'items.item']);
+
+        if ($request->filled('customer_id')) {
+            $query->where('customer_id', $request->get('customer_id'));
+        }
+
+        $returns = $query->latest('return_date')->paginate(15);
+        $customers = Customer::where('company_id', $companyId)->where('status', 'active')->get();
+
+        return view('sales.returns.index', compact('returns', 'customers'));
+    }
+
+    public function returnCreate(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $customers = Customer::where('company_id', $companyId)->where('status', 'active')->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->whereIn('item_type', ['sales_item', 'both'])->where('status', 'active')->with('unit')->get();
+
+        $invId = $request->get('sales_invoice_id');
+        $invoice = $invId ? SalesInvoice::where('company_id', $companyId)->with(['items.item.unit', 'customer'])->find($invId) : null;
+
+        return view('sales.returns.create', compact('customers', 'godowns', 'items', 'invoice'));
+    }
+
+    public function returnStore(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $data = $request->validate([
+            'customer_id' => 'required|exists:customers,id',
+            'godown_id' => 'required|exists:godowns,id',
+            'sales_invoice_id' => 'nullable|exists:sales_invoices,id',
+            'return_date' => 'required|date',
+            'return_reason' => 'required|string',
+            'stock_condition' => 'required|in:accept_to_stock,damaged_scrap',
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.batch_number' => 'nullable|string|max:50',
+            'items.*.return_quantity' => 'required|numeric|min:0.001',
+            'items.*.rate' => 'required|numeric|min:0',
+            'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        return DB::transaction(function () use ($companyId, $data) {
+            $subtotal = 0;
+            $taxTotal = 0;
+
+            foreach ($data['items'] as $it) {
+                $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $lineSub * ($taxRate / 100);
+
+                $subtotal += $lineSub;
+                $taxTotal += $lineTax;
+            }
+
+            $grandTotal = $subtotal + $taxTotal;
+            $retNo = 'SRT-' . date('Y') . '-' . sprintf('%04d', SalesReturn::where('company_id', $companyId)->count() + 1);
+
+            $sr = SalesReturn::create([
+                'company_id' => $companyId,
+                'customer_id' => $data['customer_id'],
+                'godown_id' => $data['godown_id'],
+                'sales_invoice_id' => $data['sales_invoice_id'] ?? null,
+                'return_number' => $retNo,
+                'return_date' => $data['return_date'],
+                'total_amount' => $grandTotal,
+                'return_reason' => $data['return_reason'],
+                'stock_condition' => $data['stock_condition'],
+                'status' => 'approved',
+                'created_by' => auth()->id(),
+            ]);
+
+            $inventoryService = new InventoryService();
+            foreach ($data['items'] as $it) {
+                $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
+                $taxRate = (float)($it['tax_percentage'] ?? 0);
+                $lineTax = $lineSub * ($taxRate / 100);
+                $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
+
+                SalesReturnItem::create([
+                    'sales_return_id' => $sr->id,
+                    'item_id' => $it['item_id'],
+                    'batch_number' => $batchNo,
+                    'return_quantity' => $it['return_quantity'],
+                    'rate' => $it['rate'],
+                    'tax_amount' => $lineTax,
+                    'total_amount' => $lineSub + $lineTax,
+                ]);
+
+                // If condition is accepted back to stock, inward it back to godown
+                if ($data['stock_condition'] === 'accept_to_stock') {
+                    $inventoryService->recordInward(
+                        $companyId, null, $data['godown_id'], $it['item_id'],
+                        (float)$it['return_quantity'], (float)$it['rate'], $batchNo, null,
+                        'SalesReturn', $sr->id, $retNo,
+                        "Sales return inward {$retNo} from Customer #{$data['customer_id']}"
+                    );
+                }
+            }
+
+            // Post Credit Note Journal Entry
+            $accountingService = new AccountingService();
+            $salesReturnLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Sales Returns & Inward Allowances', 'Sales & Operating Revenue', 'Revenue');
+            $gstOutputLedger = $accountingService->getOrCreateStandardLedger($companyId, 'GST Output Tax Liability (Payable)', 'Duties & Taxes', 'Liabilities');
+            $customer = Customer::find($data['customer_id']);
+
+            if ($customer && $customer->ledger) {
+                $jv = $accountingService->createJournalEntry(
+                    $companyId, null, 'Sales Return', $data['return_date'],
+                    "Credit Note {$retNo} to {$customer->name}: {$data['return_reason']}",
+                    [
+                        ['ledger_id' => $salesReturnLedger->id, 'debit' => $subtotal, 'credit' => 0, 'narration' => 'Sales Return Debit'],
+                        ['ledger_id' => $gstOutputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Reverse Output GST Liability'],
+                        ['ledger_id' => $customer->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Credit Note to Customer'],
+                    ],
+                    'SalesReturn', $sr->id, $retNo
+                );
+
+                $sr->update(['journal_entry_id' => $jv->id]);
+
+                // If linked to an invoice, reduce balance
+                if (!empty($data['sales_invoice_id'])) {
+                    $inv = SalesInvoice::find($data['sales_invoice_id']);
+                    if ($inv && $inv->balance_amount > 0) {
+                        $inv->balance_amount = max(0, $inv->balance_amount - $grandTotal);
+                        if ($inv->balance_amount == 0 && $inv->paid_amount > 0) {
+                            $inv->payment_status = 'paid';
+                        }
+                        $inv->save();
+                    }
+                }
+            }
+
+            AuditLog::log('sales', 'create_return', "Created Sales Return {$retNo} from Customer #{$data['customer_id']}");
+            return redirect()->route('sales.returns.show', $sr)->with('success', "Credit Note {$retNo} issued and customer ledger credited.");
+        });
+    }
+
+    public function returnShow(SalesReturn $return)
+    {
+        $return->load(['customer', 'invoice', 'godown', 'items.item.unit', 'journalEntry.lines.ledger']);
+        return view('sales.returns.show', compact('return'));
     }
 
     public function invoicePrint(SalesInvoice $invoice)

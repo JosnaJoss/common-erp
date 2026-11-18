@@ -35,9 +35,12 @@
                 <button type="submit" class="btn btn-sm btn-primary flex-grow-1"><i class="bi bi-filter me-1"></i> Filter</button>
                 <a href="{{ route('sales.invoices.index') }}" class="btn btn-sm btn-outline-secondary">Reset</a>
             </div>
-            <div class="col-md-3 text-end">
+            <div class="col-md-3 text-end d-flex gap-2 justify-content-end">
+                <a href="{{ route('sales.returns.index') }}" class="btn btn-sm btn-outline-danger">
+                    <i class="bi bi-arrow-return-left me-1"></i> Credit Notes
+                </a>
                 <a href="{{ route('sales.deliveries.index') }}" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-truck me-1"></i> Dispatch & Deliveries
+                    <i class="bi bi-truck me-1"></i> Deliveries
                 </a>
             </div>
         </form>
@@ -100,6 +103,9 @@
                                 <div class="btn-group btn-group-sm">
                                     <a href="{{ route('sales.invoices.show', $inv) }}" class="btn btn-outline-primary" title="View Details">
                                         <i class="bi bi-eye"></i>
+                                    </a>
+                                    <a href="{{ route('sales.invoices.edit', $inv) }}" class="btn btn-outline-secondary" title="Edit Invoice">
+                                        <i class="bi bi-pencil"></i>
                                     </a>
                                     <a href="{{ route('sales.invoices.print', $inv) }}" target="_blank" class="btn btn-outline-dark" title="Print Invoice">
                                         <i class="bi bi-printer"></i>

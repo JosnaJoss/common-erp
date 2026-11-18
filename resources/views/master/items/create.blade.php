@@ -106,6 +106,30 @@
                         </div>
                     </div>
 
+                    <!-- OPENING STOCK ENTRY (OPTIONAL) -->
+                    <div class="border rounded p-3 mb-3 bg-light">
+                        <h6 class="fw-bold mb-3 text-secondary"><i class="bi bi-box-arrow-in-down me-1"></i> Opening Stock Setup (Optional)</h6>
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold small">Initial Opening Quantity</label>
+                                <input type="number" step="0.01" min="0" name="opening_stock" class="form-control" value="{{ old('opening_stock', 0) }}" placeholder="e.g. 50">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold small">Opening Unit Cost (₹)</label>
+                                <input type="number" step="0.01" min="0" name="opening_unit_cost" class="form-control" value="{{ old('opening_unit_cost', 0) }}" placeholder="Cost per unit">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label fw-semibold small">Inward Warehouse / Godown</label>
+                                <select name="opening_godown_id" class="form-select">
+                                    <option value="">Select Warehouse</option>
+                                    @foreach($godowns as $g)
+                                        <option value="{{ $g->id }}" {{ old('opening_godown_id') == $g->id ? 'selected' : '' }}>{{ $g->name }} ({{ $g->code }})</option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="mb-4">
                         <label class="form-label fw-semibold small">Status</label>
                         <select name="status" class="form-select w-auto">

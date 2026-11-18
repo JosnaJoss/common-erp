@@ -108,6 +108,77 @@ class AccountingService
     }
 
     /**
+     * Update an existing journal entry and recalculate affected ledger balances
+     */
+    public function updateJournalEntry(
+        JournalEntry $entry,
+        string $voucherDate,
+        ?string $narration,
+        array $lines
+    ): JournalEntry {
+        return DB::transaction(function () use ($entry, $voucherDate, $narration, $lines) {
+            $totalDebit = 0;
+            $totalCredit = 0;
+
+            foreach ($lines as $line) {
+                $totalDebit += (float) ($line['debit'] ?? 0);
+                $totalCredit += (float) ($line['credit'] ?? 0);
+            }
+
+            if (abs($totalDebit - $totalCredit) > 0.05) {
+                throw new Exception("Accounting Error: Debits (" . number_format($totalDebit, 2) . ") must equal Credits (" . number_format($totalCredit, 2) . ")");
+            }
+
+            $financialYear = FinancialYear::where('company_id', $entry->company_id)
+                ->where('start_date', '<=', $voucherDate)
+                ->where('end_date', '>=', $voucherDate)
+                ->where('is_closed', false)
+                ->first();
+
+            $oldLedgerIds = $entry->lines()->pluck('ledger_id')->toArray();
+
+            $entry->update([
+                'voucher_date' => $voucherDate,
+                'financial_year_id' => $financialYear?->id ?? $entry->financial_year_id,
+                'narration' => $narration,
+                'total_debit' => $totalDebit,
+                'total_credit' => $totalCredit,
+            ]);
+
+            $entry->lines()->delete();
+
+            $newLedgerIds = [];
+            foreach ($lines as $line) {
+                $debit = (float)($line['debit'] ?? 0);
+                $credit = (float)($line['credit'] ?? 0);
+                if ($debit == 0 && $credit == 0) {
+                    continue;
+                }
+
+                JournalLine::create([
+                    'journal_entry_id' => $entry->id,
+                    'ledger_id' => $line['ledger_id'],
+                    'debit_amount' => $debit,
+                    'credit_amount' => $credit,
+                    'narration' => $line['narration'] ?? $narration,
+                ]);
+
+                $newLedgerIds[] = $line['ledger_id'];
+            }
+
+            $allAffected = array_unique(array_merge($oldLedgerIds, $newLedgerIds));
+            foreach ($allAffected as $lId) {
+                $l = Ledger::find($lId);
+                if ($l) {
+                    $l->recalculateBalance();
+                }
+            }
+
+            return $entry;
+        });
+    }
+
+    /**
      * Generate unique voucher number
      */
     public function generateVoucherNumber(int $companyId, string $type): string

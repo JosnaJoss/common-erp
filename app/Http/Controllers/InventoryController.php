@@ -346,5 +346,61 @@ class InventoryController extends Controller
 
         return view('inventory.alerts', compact('lowStock', 'expiringBatches'));
     }
+
+    // Bulk Opening Stock
+    public function openingStock(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $selectedGodownId = $request->get('godown_id', $godowns->first()?->id);
+
+        $items = Item::where('company_id', $companyId)
+            ->where('status', 'active')
+            ->with(['unit', 'batches' => fn($q) => $q->where('godown_id', $selectedGodownId)])
+            ->get();
+
+        return view('inventory.opening_stock', compact('godowns', 'selectedGodownId', 'items'));
+    }
+
+    public function openingStockStore(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $data = $request->validate([
+            'godown_id' => 'required|exists:godowns,id',
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.quantity' => 'nullable|numeric|min:0',
+            'items.*.unit_cost' => 'nullable|numeric|min:0',
+        ]);
+
+        $inventoryService = new InventoryService();
+        $count = 0;
+
+        foreach ($data['items'] as $row) {
+            $qty = (float)($row['quantity'] ?? 0);
+            if ($qty > 0) {
+                $cost = (float)($row['unit_cost'] ?? 0);
+                $inventoryService->recordInward(
+                    $companyId,
+                    null,
+                    $data['godown_id'],
+                    $row['item_id'],
+                    $qty,
+                    $cost,
+                    'DEFAULT',
+                    null,
+                    'Opening Stock',
+                    null,
+                    'OPENING-' . date('Ymd'),
+                    'Bulk Opening Stock Inward'
+                );
+                $count++;
+            }
+        }
+
+        AuditLog::log('inventory', 'opening_stock', "Recorded opening stock for {$count} items in Godown #{$data['godown_id']}");
+        return redirect()->route('inventory.overview', ['godown_id' => $data['godown_id']])
+            ->with('success', "Opening stock successfully recorded for {$count} items.");
+    }
 }
 

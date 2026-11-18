@@ -178,6 +178,8 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::get('/adjustments', [InventoryController::class, 'adjustments'])->name('adjustments');
         Route::post('/adjustments', [InventoryController::class, 'adjustmentStore'])->name('adjustments.store');
         Route::get('/alerts', [InventoryController::class, 'alerts'])->name('alerts');
+        Route::get('/opening-stock', [InventoryController::class, 'openingStock'])->name('opening_stock.index');
+        Route::post('/opening-stock', [InventoryController::class, 'openingStockStore'])->name('opening_stock.store');
     });
 
     // Procurement & Purchases
@@ -200,9 +202,16 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::get('/entries/create', [PurchaseController::class, 'entryCreate'])->name('entries.create');
         Route::post('/entries', [PurchaseController::class, 'entryStore'])->name('entries.store');
         Route::get('/entries/{entry}', [PurchaseController::class, 'entryShow'])->name('entries.show');
+        Route::get('/entries/{entry}/edit', [PurchaseController::class, 'entryEdit'])->name('entries.edit');
+        Route::put('/entries/{entry}', [PurchaseController::class, 'entryUpdate'])->name('entries.update');
 
         Route::get('/payments', [PurchaseController::class, 'payments'])->name('payments.index');
         Route::post('/payments', [PurchaseController::class, 'paymentStore'])->name('payments.store');
+
+        Route::get('/returns', [PurchaseController::class, 'returns'])->name('returns.index');
+        Route::get('/returns/create', [PurchaseController::class, 'returnCreate'])->name('returns.create');
+        Route::post('/returns', [PurchaseController::class, 'returnStore'])->name('returns.store');
+        Route::get('/returns/{return}', [PurchaseController::class, 'returnShow'])->name('returns.show');
     });
 
     // Sales & Distribution
@@ -217,6 +226,8 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::post('/invoices', [SalesController::class, 'invoiceStore'])->name('invoices.store');
         Route::get('/invoices/{invoice}', [SalesController::class, 'invoiceShow'])->name('invoices.show');
         Route::get('/invoices/{invoice}/print', [SalesController::class, 'invoicePrint'])->name('invoices.print');
+        Route::get('/invoices/{invoice}/edit', [SalesController::class, 'invoiceEdit'])->name('invoices.edit');
+        Route::put('/invoices/{invoice}', [SalesController::class, 'invoiceUpdate'])->name('invoices.update');
 
         Route::get('/deliveries', [SalesController::class, 'deliveries'])->name('deliveries.index');
         Route::post('/deliveries', [SalesController::class, 'deliveryStore'])->name('deliveries.store');
@@ -224,6 +235,11 @@ Route::middleware(['auth', 'company.context'])->group(function () {
 
         Route::get('/collections', [SalesController::class, 'collections'])->name('collections.index');
         Route::post('/collections', [SalesController::class, 'collectionStore'])->name('collections.store');
+
+        Route::get('/returns', [SalesController::class, 'returns'])->name('returns.index');
+        Route::get('/returns/create', [SalesController::class, 'returnCreate'])->name('returns.create');
+        Route::post('/returns', [SalesController::class, 'returnStore'])->name('returns.store');
+        Route::get('/returns/{return}', [SalesController::class, 'returnShow'])->name('returns.show');
     });
 
     // Accounts & Double-Entry Finance

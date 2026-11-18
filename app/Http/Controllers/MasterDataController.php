@@ -425,7 +425,8 @@ class MasterDataController extends Controller
         $subcategories = Subcategory::where('company_id', $companyId)->where('status', 'active')->get();
         $products = Product::where('company_id', $companyId)->where('status', 'active')->get();
         $units = Unit::where('company_id', $companyId)->where('status', 'active')->get();
-        return view('master.items.create', compact('categories', 'subcategories', 'products', 'units'));
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        return view('master.items.create', compact('categories', 'subcategories', 'products', 'units', 'godowns'));
     }
 
     public function itemStore(Request $request)
@@ -447,10 +448,32 @@ class MasterDataController extends Controller
             'hsn_code' => 'nullable|string|max:50',
             'reorder_quantity' => 'required|numeric|min:0',
             'status' => 'required|in:active,inactive',
+            'opening_stock' => 'nullable|numeric|min:0',
+            'opening_unit_cost' => 'nullable|numeric|min:0',
+            'opening_godown_id' => 'nullable|exists:godowns,id',
         ]);
 
-        $data['company_id'] = $companyId;
-        Item::create($data);
+        $itemData = collect($data)->except(['opening_stock', 'opening_unit_cost', 'opening_godown_id'])->toArray();
+        $itemData['company_id'] = $companyId;
+        $item = Item::create($itemData);
+
+        if (!empty($data['opening_stock']) && (float)$data['opening_stock'] > 0 && !empty($data['opening_godown_id'])) {
+            $inventoryService = new \App\Services\InventoryService();
+            $inventoryService->recordInward(
+                $companyId,
+                null,
+                $data['opening_godown_id'],
+                $item->id,
+                (float)$data['opening_stock'],
+                (float)($data['opening_unit_cost'] ?? 0),
+                'DEFAULT',
+                null,
+                'Opening Stock',
+                $item->id,
+                'OPENING-' . $item->code,
+                "Opening stock recorded upon item creation"
+            );
+        }
 
         AuditLog::log('master', 'create', "Created Item {$data['name']} ({$data['code']})");
         return redirect()->route('master.items.index')->with('success', 'Item created successfully.');
