@@ -152,9 +152,10 @@ class SalesController extends Controller
         $customers = Customer::where('company_id', $companyId)->where('status', 'active')->get();
         $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
         $items = Item::where('company_id', $companyId)->whereIn('item_type', ['sales_item', 'both'])->where('status', 'active')->with('unit')->get();
+        $units = \App\Models\Unit::where('company_id', $companyId)->where('status', 'active')->get();
         $bankLedgers = Ledger::where('company_id', $companyId)->where('is_bank_or_cash', true)->where('status', 'active')->get();
 
-        return view('sales.invoices.create', compact('so', 'customers', 'godowns', 'items', 'bankLedgers'));
+        return view('sales.invoices.create', compact('so', 'customers', 'godowns', 'items', 'units', 'bankLedgers'));
     }
 
     public function invoiceStore(Request $request)
@@ -172,6 +173,7 @@ class SalesController extends Controller
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
+            'items.*.unit_id' => 'nullable|exists:units,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
@@ -187,8 +189,12 @@ class SalesController extends Controller
             $subtotal = 0;
             $totalItemDiscount = 0;
             $taxTotal = 0;
+            $processedItems = [];
 
             foreach ($data['items'] as $it) {
+                $itemModel = Item::with('unit')->find($it['item_id']);
+                $conversion = \App\Services\UnitConversionService::convertToBaseQuantity($itemModel, (float)$it['quantity'], $it['unit_id'] ?? null);
+
                 $lineGross = (float)$it['quantity'] * (float)$it['rate'];
                 $lineDisc = (float)($it['discount_amount'] ?? 0);
                 $taxable = max(0, $lineGross - $lineDisc);
@@ -198,6 +204,17 @@ class SalesController extends Controller
                 $subtotal += $lineGross;
                 $totalItemDiscount += $lineDisc;
                 $taxTotal += $lineTax;
+
+                $processedItems[] = [
+                    'raw' => $it,
+                    'item' => $itemModel,
+                    'conversion' => $conversion,
+                    'line_gross' => $lineGross,
+                    'line_disc' => $lineDisc,
+                    'taxable' => $taxable,
+                    'tax_rate' => $taxRate,
+                    'line_tax' => $lineTax,
+                ];
             }
 
             $totalDiscount = $totalItemDiscount + $billDiscount;
@@ -236,30 +253,30 @@ class SalesController extends Controller
 
             $inventoryService = new InventoryService();
 
-            foreach ($data['items'] as $it) {
-                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
-                $lineDisc = (float)($it['discount_amount'] ?? 0);
-                $taxable = max(0, $lineGross - $lineDisc);
-                $taxRate = (float)($it['tax_percentage'] ?? 0);
-                $lineTax = $taxable * ($taxRate / 100);
+            foreach ($processedItems as $p) {
+                $it = $p['raw'];
+                $conversion = $p['conversion'];
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
 
                 SalesInvoiceItem::create([
                     'sales_invoice_id' => $invoice->id,
                     'item_id' => $it['item_id'],
+                    'unit_id' => $conversion['unit_id'],
+                    'entered_quantity' => $conversion['entered_quantity'],
+                    'base_quantity' => $conversion['base_quantity'],
                     'batch_number' => $batchNo,
-                    'quantity' => $it['quantity'],
+                    'quantity' => $conversion['base_quantity'],
                     'rate' => $it['rate'],
-                    'tax_percentage' => $taxRate,
-                    'tax_amount' => $lineTax,
-                    'discount_amount' => $lineDisc,
-                    'line_total' => $taxable + $lineTax,
+                    'tax_percentage' => $p['tax_rate'],
+                    'tax_amount' => $p['line_tax'],
+                    'discount_amount' => $p['line_disc'],
+                    'line_total' => $p['taxable'] + $p['line_tax'],
                 ]);
 
-                // Update stock outward
+                // Update stock outward using normalized base quantity
                 $inventoryService->recordOutward(
                     $companyId, null, $data['godown_id'], $it['item_id'],
-                    (float)$it['quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invNo,
+                    (float)$conversion['base_quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invNo,
                     "Dispatched on Invoice {$invNo}"
                 );
             }
@@ -336,12 +353,13 @@ class SalesController extends Controller
             abort(403);
         }
 
-        $invoice->load(['customer', 'godown', 'items.item.unit']);
+        $invoice->load(['customer', 'godown', 'items.item.unit', 'items.unit']);
         $customers = Customer::where('company_id', $companyId)->where('status', 'active')->get();
         $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
         $items = Item::where('company_id', $companyId)->whereIn('item_type', ['sales_item', 'both'])->where('status', 'active')->with('unit')->get();
+        $units = \App\Models\Unit::where('company_id', $companyId)->where('status', 'active')->get();
 
-        return view('sales.invoices.edit', compact('invoice', 'customers', 'godowns', 'items'));
+        return view('sales.invoices.edit', compact('invoice', 'customers', 'godowns', 'items', 'units'));
     }
 
     public function invoiceUpdate(Request $request, SalesInvoice $invoice)
@@ -361,6 +379,7 @@ class SalesController extends Controller
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
+            'items.*.unit_id' => 'nullable|exists:units,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
@@ -373,10 +392,11 @@ class SalesController extends Controller
 
             // 1. Revert previous outward quantities back to stock batches
             foreach ($invoice->items as $oldItem) {
+                $revertQty = (float)($oldItem->base_quantity ?: $oldItem->quantity);
                 $inventoryService->revertOutward(
                     $invoice->godown_id,
                     $oldItem->item_id,
-                    (float)$oldItem->quantity,
+                    $revertQty,
                     $oldItem->batch_number ?? 'DEFAULT'
                 );
             }
@@ -386,8 +406,12 @@ class SalesController extends Controller
             $subtotal = 0;
             $totalItemDiscount = 0;
             $taxTotal = 0;
+            $processedItems = [];
 
             foreach ($data['items'] as $it) {
+                $itemModel = Item::with('unit')->find($it['item_id']);
+                $conversion = \App\Services\UnitConversionService::convertToBaseQuantity($itemModel, (float)$it['quantity'], $it['unit_id'] ?? null);
+
                 $lineGross = (float)$it['quantity'] * (float)$it['rate'];
                 $lineDisc = (float)($it['discount_amount'] ?? 0);
                 $taxable = max(0, $lineGross - $lineDisc);
@@ -397,6 +421,17 @@ class SalesController extends Controller
                 $subtotal += $lineGross;
                 $totalItemDiscount += $lineDisc;
                 $taxTotal += $lineTax;
+
+                $processedItems[] = [
+                    'raw' => $it,
+                    'item' => $itemModel,
+                    'conversion' => $conversion,
+                    'line_gross' => $lineGross,
+                    'line_disc' => $lineDisc,
+                    'taxable' => $taxable,
+                    'tax_rate' => $taxRate,
+                    'line_tax' => $lineTax,
+                ];
             }
 
             $totalDiscount = $totalItemDiscount + $billDiscount;
@@ -424,30 +459,30 @@ class SalesController extends Controller
             // 4. Delete old line items and insert new line items
             $invoice->items()->delete();
 
-            foreach ($data['items'] as $it) {
-                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
-                $lineDisc = (float)($it['discount_amount'] ?? 0);
-                $taxable = max(0, $lineGross - $lineDisc);
-                $taxRate = (float)($it['tax_percentage'] ?? 0);
-                $lineTax = $taxable * ($taxRate / 100);
+            foreach ($processedItems as $p) {
+                $it = $p['raw'];
+                $conversion = $p['conversion'];
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
 
                 SalesInvoiceItem::create([
                     'sales_invoice_id' => $invoice->id,
                     'item_id' => $it['item_id'],
+                    'unit_id' => $conversion['unit_id'],
+                    'entered_quantity' => $conversion['entered_quantity'],
+                    'base_quantity' => $conversion['base_quantity'],
                     'batch_number' => $batchNo,
-                    'quantity' => $it['quantity'],
+                    'quantity' => $conversion['base_quantity'],
                     'rate' => $it['rate'],
-                    'tax_percentage' => $taxRate,
-                    'tax_amount' => $lineTax,
-                    'discount_amount' => $lineDisc,
-                    'line_total' => $taxable + $lineTax,
+                    'tax_percentage' => $p['tax_rate'],
+                    'tax_amount' => $p['line_tax'],
+                    'discount_amount' => $p['line_disc'],
+                    'line_total' => $p['taxable'] + $p['line_tax'],
                 ]);
 
-                // Deduct updated outward stock
+                // Deduct updated outward stock using base quantity
                 $inventoryService->recordOutward(
                     $companyId, null, $data['godown_id'], $it['item_id'],
-                    (float)$it['quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invoice->invoice_number,
+                    (float)$conversion['base_quantity'], $batchNo, 'SalesInvoice', $invoice->id, $invoice->invoice_number,
                     "Dispatched on Invoice {$invoice->invoice_number} (Updated)"
                 );
             }
@@ -524,6 +559,7 @@ class SalesController extends Controller
             'stock_condition' => 'required|in:accept_to_stock,damaged_scrap',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
+            'items.*.unit_id' => 'nullable|exists:units,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.return_quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
@@ -533,14 +569,27 @@ class SalesController extends Controller
         return DB::transaction(function () use ($companyId, $data) {
             $subtotal = 0;
             $taxTotal = 0;
+            $processedItems = [];
 
             foreach ($data['items'] as $it) {
+                $itemModel = Item::with('unit')->find($it['item_id']);
+                $conversion = \App\Services\UnitConversionService::convertToBaseQuantity($itemModel, (float)$it['return_quantity'], $it['unit_id'] ?? null);
+
                 $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
                 $taxRate = (float)($it['tax_percentage'] ?? 0);
                 $lineTax = $lineSub * ($taxRate / 100);
 
                 $subtotal += $lineSub;
                 $taxTotal += $lineTax;
+
+                $processedItems[] = [
+                    'raw' => $it,
+                    'item' => $itemModel,
+                    'conversion' => $conversion,
+                    'line_sub' => $lineSub,
+                    'tax_rate' => $taxRate,
+                    'line_tax' => $lineTax,
+                ];
             }
 
             $grandTotal = $subtotal + $taxTotal;
@@ -561,27 +610,30 @@ class SalesController extends Controller
             ]);
 
             $inventoryService = new InventoryService();
-            foreach ($data['items'] as $it) {
-                $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
-                $taxRate = (float)($it['tax_percentage'] ?? 0);
-                $lineTax = $lineSub * ($taxRate / 100);
+            foreach ($processedItems as $p) {
+                $it = $p['raw'];
+                $conversion = $p['conversion'];
+                $lineTax = $p['line_tax'];
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
 
                 SalesReturnItem::create([
                     'sales_return_id' => $sr->id,
                     'item_id' => $it['item_id'],
+                    'unit_id' => $conversion['unit_id'],
+                    'entered_quantity' => $conversion['entered_quantity'],
+                    'base_quantity' => $conversion['base_quantity'],
                     'batch_number' => $batchNo,
-                    'return_quantity' => $it['return_quantity'],
+                    'return_quantity' => $conversion['base_quantity'],
                     'rate' => $it['rate'],
                     'tax_amount' => $lineTax,
-                    'total_amount' => $lineSub + $lineTax,
+                    'total_amount' => $p['line_sub'] + $lineTax,
                 ]);
 
-                // If condition is accepted back to stock, inward it back to godown
+                // If condition is accepted back to stock, inward it back to godown using base quantity
                 if ($data['stock_condition'] === 'accept_to_stock') {
                     $inventoryService->recordInward(
                         $companyId, null, $data['godown_id'], $it['item_id'],
-                        (float)$it['return_quantity'], (float)$it['rate'], $batchNo, null,
+                        (float)$conversion['base_quantity'], (float)$it['rate'], $batchNo, null,
                         'SalesReturn', $sr->id, $retNo,
                         "Sales return inward {$retNo} from Customer #{$data['customer_id']}"
                     );
@@ -636,6 +688,13 @@ class SalesController extends Controller
     {
         $invoice->load(['customer', 'godown', 'items.item.unit', 'company']);
         return view('sales.invoices.print', compact('invoice'));
+    }
+
+    public function invoicePdf(SalesInvoice $invoice)
+    {
+        $invoice->load(['customer', 'godown', 'items.item.unit', 'company']);
+        $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('sales.invoices.pdf', compact('invoice'));
+        return $pdf->download("invoice_{$invoice->invoice_number}.pdf");
     }
 
     // ==================== DELIVERIES & DISPATCH ====================

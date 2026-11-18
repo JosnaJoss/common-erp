@@ -110,6 +110,9 @@
                                     <a href="{{ route('sales.invoices.print', $inv) }}" target="_blank" class="btn btn-outline-dark" title="Print Invoice">
                                         <i class="bi bi-printer"></i>
                                     </a>
+                                    <a href="{{ route('sales.invoices.pdf', $inv) }}" class="btn btn-outline-danger" title="Download PDF">
+                                        <i class="bi bi-file-earmark-pdf"></i>
+                                    </a>
                                 </div>
                             </td>
                         </tr>

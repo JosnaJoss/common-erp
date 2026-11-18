@@ -136,6 +136,16 @@ class Staff extends Model
         return $this->hasMany(Payroll::class);
     }
 
+    public function advances()
+    {
+        return $this->hasMany(SalaryAdvance::class);
+    }
+
+    public function loans()
+    {
+        return $this->hasMany(StaffLoan::class);
+    }
+
     public function targets()
     {
         return $this->hasMany(StaffTarget::class);

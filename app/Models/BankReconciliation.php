@@ -20,6 +20,7 @@ class BankReconciliation extends Model
         'difference',
         'status',
         'notes',
+        'import_filename',
         'reconciled_at',
         'reconciled_by',
         'created_by',
@@ -29,6 +30,11 @@ class BankReconciliation extends Model
         'statement_date' => 'date',
         'reconciled_at' => 'datetime',
     ];
+
+    public function company()
+    {
+        return $this->belongsTo(Company::class);
+    }
 
     public function bankLedger()
     {

@@ -12,6 +12,9 @@ class SalesReturnItem extends Model
     protected $fillable = [
         'sales_return_id',
         'item_id',
+        'unit_id',
+        'entered_quantity',
+        'base_quantity',
         'batch_number',
         'return_quantity',
         'rate',
@@ -27,6 +30,11 @@ class SalesReturnItem extends Model
     public function item()
     {
         return $this->belongsTo(Item::class);
+    }
+
+    public function unit()
+    {
+        return $this->belongsTo(Unit::class);
     }
 }
 

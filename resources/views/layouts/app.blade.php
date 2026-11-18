@@ -230,6 +230,8 @@
                     <a href="{{ route('staff.index') }}" class="nav-link-custom {{ request()->routeIs('staff.index', 'staff.show', 'staff.create', 'staff.edit') ? 'active' : '' }}">Staff Directory</a>
                     <a href="{{ route('staff.attendance.index') }}" class="nav-link-custom {{ request()->routeIs('staff.attendance.*') ? 'active' : '' }}">Daily Attendance</a>
                     <a href="{{ route('staff.payroll.index') }}" class="nav-link-custom {{ request()->routeIs('staff.payroll.*') ? 'active' : '' }}">Payroll Processing</a>
+                    <a href="{{ route('staff.advances.index') }}" class="nav-link-custom {{ request()->routeIs('staff.advances.*') ? 'active' : '' }}">Salary Advances</a>
+                    <a href="{{ route('staff.loans.index') }}" class="nav-link-custom {{ request()->routeIs('staff.loans.*') ? 'active' : '' }}">Staff Loans</a>
                     <a href="{{ route('staff.leaves.index') }}" class="nav-link-custom {{ request()->routeIs('staff.leaves.*') ? 'active' : '' }}">Leave Requests</a>
                     <a href="{{ route('staff.overtime.index') }}" class="nav-link-custom {{ request()->routeIs('staff.overtime.*') ? 'active' : '' }}">Overtime Tracking</a>
                     <a href="{{ route('staff.shifts.index') }}" class="nav-link-custom {{ request()->routeIs('staff.shifts.*') ? 'active' : '' }}">Shifts & Rosters</a>
@@ -322,6 +324,9 @@
                     <a href="{{ route('accounts.chart_of_accounts') }}" class="nav-link-custom {{ request()->routeIs('accounts.chart_of_accounts') ? 'active' : '' }}">Chart of Accounts</a>
                     <a href="{{ route('accounts.ledgers.index') }}" class="nav-link-custom {{ request()->routeIs('accounts.ledgers.*') ? 'active' : '' }}">Ledgers & Balances</a>
                     <a href="{{ route('accounts.vouchers.index') }}" class="nav-link-custom {{ request()->routeIs('accounts.vouchers.*') ? 'active' : '' }}">Journal Entries / Vouchers</a>
+                    <a href="{{ route('accounts.bank_reconciliation.index') }}" class="nav-link-custom {{ request()->routeIs('accounts.bank_reconciliation.*') ? 'active' : '' }}">Bank Reconciliation</a>
+                    <a href="{{ route('accounts.petty_cash.index') }}" class="nav-link-custom {{ request()->routeIs('accounts.petty_cash.*') ? 'active' : '' }}">Petty Cash</a>
+                    <a href="{{ route('accounts.capital.index') }}" class="nav-link-custom {{ request()->routeIs('accounts.capital.*') ? 'active' : '' }}">Capital & Equity</a>
                     <a href="{{ route('accounts.financial_years.index') }}" class="nav-link-custom {{ request()->routeIs('accounts.financial_years.*') ? 'active' : '' }}">Financial Years</a>
                 </div>
             </div>

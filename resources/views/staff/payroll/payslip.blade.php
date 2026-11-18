@@ -6,7 +6,7 @@
 <div class="row justify-content-center">
     <div class="col-lg-10">
         <div class="d-flex justify-content-between align-items-center mb-3 d-print-none">
-            <a href="{{ route('staff.payroll.index') }}" class="btn btn-outline-secondary">
+            <a href="{{ route('staff.payroll.index', ['month' => $payroll->salary_month]) }}" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i> Back to Payroll
             </a>
             <div>
@@ -27,12 +27,12 @@
                 <div class="col-4 text-end">
                     <span class="badge bg-light text-dark border px-3 py-2 fs-6">CONFIDENTIAL PAYSLIP</span>
                     <h5 class="fw-bold mt-2 mb-0">{{ \Carbon\Carbon::parse($payroll->salary_month . '-01')->format('F Y') }}</h5>
-                    <small class="text-muted">Status: <span class="badge bg-{{ $payroll->payroll_status === 'paid' ? 'success' : 'warning' }}">{{ strtoupper($payroll->payroll_status) }}</span></small>
+                    <small class="text-muted">Status: <span class="badge bg-{{ $payroll->payroll_status === 'paid' ? 'success' : 'warning text-dark' }}">{{ strtoupper($payroll->payroll_status) }}</span></small>
                 </div>
             </div>
 
             <!-- Employee Details Grid -->
-            <div class="card bg-light border-0 mb-4">
+            <div class="card bg-light border-0 mb-3">
                 <div class="card-body p-3">
                     <div class="row g-2 small">
                         <div class="col-md-3"><strong>Employee Name:</strong> {{ $payroll->staff->full_name }}</div>
@@ -49,6 +49,33 @@
                         <div class="col-md-3"><strong>PF Number:</strong> {{ $payroll->staff->pf_number ?? 'N/A' }}</div>
                         <div class="col-md-3"><strong>ESI Number:</strong> {{ $payroll->staff->esi_number ?? 'N/A' }}</div>
                         <div class="col-md-3"><strong>Payment Mode:</strong> {{ $payroll->payment_mode ?? 'Bank Transfer' }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Attendance Summary -->
+            <div class="card border mb-4">
+                <div class="card-header bg-light py-2">
+                    <h6 class="mb-0 text-dark fw-bold small"><i class="bi bi-calendar3-check me-1"></i> Attendance & Working Days Summary</h6>
+                </div>
+                <div class="card-body py-2">
+                    <div class="row text-center small">
+                        <div class="col-3 border-end">
+                            <span class="text-muted d-block">Days in Month</span>
+                            <strong class="fs-6 text-dark">{{ $payroll->total_days ?? 30 }}</strong>
+                        </div>
+                        <div class="col-3 border-end">
+                            <span class="text-muted d-block">Payable Days</span>
+                            <strong class="fs-6 text-success">{{ $payroll->present_days ?? (($payroll->total_days ?? 30) - ($payroll->absent_days ?? 0)) }}</strong>
+                        </div>
+                        <div class="col-3 border-end">
+                            <span class="text-muted d-block">Absent / LOP Days</span>
+                            <strong class="fs-6 {{ ($payroll->absent_days ?? 0) > 0 ? 'text-danger' : 'text-dark' }}">{{ $payroll->absent_days ?? 0 }}</strong>
+                        </div>
+                        <div class="col-3">
+                            <span class="text-muted d-block">Overtime Hours</span>
+                            <strong class="fs-6 text-primary">{{ $payroll->overtime_hours ?? 0 }} hrs</strong>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -83,6 +110,10 @@
                                         <td>Incentives / Bonus</td>
                                         <td class="text-end fw-semibold">₹ {{ number_format($payroll->incentives, 2) }}</td>
                                     </tr>
+                                    <tr>
+                                        <td class="text-muted">&nbsp;</td>
+                                        <td>&nbsp;</td>
+                                    </tr>
                                 </tbody>
                                 <tfoot class="border-top fw-bold bg-light">
                                     <tr>
@@ -104,6 +135,10 @@
                             <table class="table table-sm mb-0">
                                 <tbody>
                                     <tr>
+                                        <td>Loss of Pay (LOP) Deduction</td>
+                                        <td class="text-end fw-semibold text-danger">₹ {{ number_format($payroll->lop_deduction, 2) }}</td>
+                                    </tr>
+                                    <tr>
                                         <td>Provident Fund (PF)</td>
                                         <td class="text-end fw-semibold">₹ {{ number_format($payroll->pf_deduction, 2) }}</td>
                                     </tr>
@@ -112,16 +147,16 @@
                                         <td class="text-end fw-semibold">₹ {{ number_format($payroll->esi_deduction, 2) }}</td>
                                     </tr>
                                     <tr>
+                                        <td>Salary Advance Recovery</td>
+                                        <td class="text-end fw-semibold text-warning text-dark">₹ {{ number_format($payroll->advance_deduction, 2) }}</td>
+                                    </tr>
+                                    <tr>
+                                        <td>Staff Loan EMI Deduction</td>
+                                        <td class="text-end fw-semibold text-info text-dark">₹ {{ number_format($payroll->loan_deduction, 2) }}</td>
+                                    </tr>
+                                    <tr>
                                         <td>Other Deductions / TDS</td>
                                         <td class="text-end fw-semibold">₹ {{ number_format($payroll->other_deductions, 2) }}</td>
-                                    </tr>
-                                    <tr>
-                                        <td class="text-muted">&nbsp;</td>
-                                        <td>&nbsp;</td>
-                                    </tr>
-                                    <tr>
-                                        <td class="text-muted">&nbsp;</td>
-                                        <td>&nbsp;</td>
                                     </tr>
                                 </tbody>
                                 <tfoot class="border-top fw-bold bg-light">
@@ -142,9 +177,12 @@
                     <div>
                         <span class="text-muted text-uppercase small fw-bold">Net Salary Payable</span>
                         <h3 class="fw-bold text-primary mb-0">₹ {{ number_format($payroll->net_salary, 2) }}</h3>
+                        <div class="small text-muted mt-1">(Gross Earnings - Total Deductions)</div>
                     </div>
                     <div class="text-end">
                         <small class="text-muted">Payment Date: {{ $payroll->payment_date ? \Carbon\Carbon::parse($payroll->payment_date)->format('d M Y') : 'Pending Disbursement' }}</small>
+                        <br>
+                        <small class="text-muted">Disbursed Via: {{ $payroll->payment_mode ?? 'Bank Transfer' }}</small>
                         <br>
                         <small class="text-muted">Voucher Ref: {{ $payroll->journalEntry->voucher_no ?? 'N/A' }}</small>
                     </div>
@@ -177,4 +215,3 @@
     </div>
 </div>
 @endsection
-

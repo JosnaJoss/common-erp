@@ -16,9 +16,11 @@ class BankReconciliationItem extends Model
         'clearance_date',
         'cheque_reference',
         'description',
+        'source',
         'debit_amount',
         'credit_amount',
         'is_cleared',
+        'matched_item_id',
     ];
 
     protected $casts = [
@@ -35,5 +37,10 @@ class BankReconciliationItem extends Model
     public function journalLine()
     {
         return $this->belongsTo(JournalLine::class);
+    }
+
+    public function matchedItem()
+    {
+        return $this->belongsTo(BankReconciliationItem::class, 'matched_item_id');
     }
 }

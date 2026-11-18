@@ -3,6 +3,8 @@
 use App\Http\Controllers\AccountsController;
 use App\Http\Controllers\AttendanceController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BankReconciliationController;
+use App\Http\Controllers\CapitalController;
 use App\Http\Controllers\CompanyController;
 use App\Http\Controllers\CustomerController;
 use App\Http\Controllers\DailyOperationController;
@@ -12,10 +14,12 @@ use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\LeaveController;
 use App\Http\Controllers\MasterDataController;
 use App\Http\Controllers\PayrollController;
+use App\Http\Controllers\PettyCashController;
 use App\Http\Controllers\PurchaseController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SalesController;
 use App\Http\Controllers\SettingsController;
+use App\Http\Controllers\StaffAdvanceLoanController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\SupplierController;
 use Illuminate\Support\Facades\Route;
@@ -161,6 +165,16 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::post('/payroll/generate', [PayrollController::class, 'generate'])->name('payroll.generate');
         Route::get('/payroll/{payroll}/payslip', [PayrollController::class, 'payslip'])->name('payroll.payslip');
         Route::post('/payroll/{payroll}/pay', [PayrollController::class, 'pay'])->name('payroll.pay');
+        Route::post('/payroll/bulk-pay', [PayrollController::class, 'bulkPay'])->name('payroll.bulk_pay');
+
+        // Salary Advances
+        Route::get('/advances', [StaffAdvanceLoanController::class, 'advancesIndex'])->name('advances.index');
+        Route::post('/advances', [StaffAdvanceLoanController::class, 'advanceStore'])->name('advances.store');
+
+        // Staff Loans
+        Route::get('/loans', [StaffAdvanceLoanController::class, 'loansIndex'])->name('loans.index');
+        Route::post('/loans', [StaffAdvanceLoanController::class, 'loanStore'])->name('loans.store');
+        Route::get('/loans/{loan}', [StaffAdvanceLoanController::class, 'loanShow'])->name('loans.show');
     });
 
     // Stock & Inventory
@@ -226,6 +240,7 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::post('/invoices', [SalesController::class, 'invoiceStore'])->name('invoices.store');
         Route::get('/invoices/{invoice}', [SalesController::class, 'invoiceShow'])->name('invoices.show');
         Route::get('/invoices/{invoice}/print', [SalesController::class, 'invoicePrint'])->name('invoices.print');
+        Route::get('/invoices/{invoice}/pdf', [SalesController::class, 'invoicePdf'])->name('invoices.pdf');
         Route::get('/invoices/{invoice}/edit', [SalesController::class, 'invoiceEdit'])->name('invoices.edit');
         Route::put('/invoices/{invoice}', [SalesController::class, 'invoiceUpdate'])->name('invoices.update');
 
@@ -257,6 +272,44 @@ Route::middleware(['auth', 'company.context'])->group(function () {
 
         Route::get('/financial-years', [AccountsController::class, 'financialYears'])->name('financial_years.index');
         Route::post('/financial-years', [AccountsController::class, 'financialYearStore'])->name('financial_years.store');
+
+        // Bank Reconciliation (BRS)
+        Route::prefix('bank-reconciliation')->name('bank_reconciliation.')->group(function () {
+            Route::get('/', [BankReconciliationController::class, 'index'])->name('index');
+            Route::get('/create', [BankReconciliationController::class, 'create'])->name('create');
+            Route::post('/', [BankReconciliationController::class, 'store'])->name('store');
+            Route::get('/{bankReconciliation}', [BankReconciliationController::class, 'show'])->name('show');
+            Route::post('/{bankReconciliation}/import', [BankReconciliationController::class, 'importStatement'])->name('import');
+            Route::post('/{bankReconciliation}/match', [BankReconciliationController::class, 'match'])->name('match');
+            Route::post('/{bankReconciliation}/unmatch', [BankReconciliationController::class, 'unmatch'])->name('unmatch');
+            Route::post('/{bankReconciliation}/clear/{item}', [BankReconciliationController::class, 'toggleClearance'])->name('clear');
+            Route::post('/{bankReconciliation}/adjustment', [BankReconciliationController::class, 'recordAdjustment'])->name('adjustment');
+            Route::post('/{bankReconciliation}/complete', [BankReconciliationController::class, 'complete'])->name('complete');
+            Route::get('/{bankReconciliation}/report', [BankReconciliationController::class, 'report'])->name('report');
+        });
+
+        // Petty Cash Module
+        Route::prefix('petty-cash')->name('petty_cash.')->group(function () {
+            Route::get('/', [PettyCashController::class, 'index'])->name('index');
+            Route::post('/accounts', [PettyCashController::class, 'accountsStore'])->name('accounts.store');
+            Route::post('/categories', [PettyCashController::class, 'categoriesStore'])->name('categories.store');
+            Route::get('/vouchers/create', [PettyCashController::class, 'voucherCreate'])->name('vouchers.create');
+            Route::post('/vouchers', [PettyCashController::class, 'voucherStore'])->name('vouchers.store');
+            Route::get('/vouchers/{voucher}', [PettyCashController::class, 'voucherShow'])->name('vouchers.show');
+            Route::get('/vouchers/{voucher}/print', [PettyCashController::class, 'voucherPrint'])->name('vouchers.print');
+            Route::post('/replenish', [PettyCashController::class, 'replenishStore'])->name('replenish.store');
+            Route::get('/daybook', [PettyCashController::class, 'daybook'])->name('daybook');
+        });
+
+        // Capital Investment & Drawings Module
+        Route::prefix('capital')->name('capital.')->group(function () {
+            Route::get('/', [CapitalController::class, 'index'])->name('index');
+            Route::post('/investors', [CapitalController::class, 'investorStore'])->name('investors.store');
+            Route::put('/investors/{investor}', [CapitalController::class, 'investorUpdate'])->name('investors.update');
+            Route::get('/investors/{investor}', [CapitalController::class, 'investorShow'])->name('investors.show');
+            Route::post('/transactions', [CapitalController::class, 'transactionStore'])->name('transactions.store');
+            Route::get('/statement/{investor?}', [CapitalController::class, 'statement'])->name('statement');
+        });
     });
 
     // Daily Operations & Work Reports

@@ -97,14 +97,15 @@
                         <table class="table table-bordered align-middle mb-0" id="invItemsTable">
                             <thead class="table-light small">
                                 <tr>
-                                    <th style="width: 28%;">Item & Unit</th>
-                                    <th style="width: 14%;">Batch #</th>
-                                    <th style="width: 12%;">Qty</th>
-                                    <th style="width: 14%;">Rate (₹)</th>
-                                    <th style="width: 12%;">Disc (₹)</th>
-                                    <th style="width: 10%;">GST %</th>
-                                    <th class="text-end" style="width: 14%;">Total (₹)</th>
-                                    <th class="text-center" style="width: 6%;"></th>
+                                    <th style="width: 24%;">Item</th>
+                                    <th style="width: 13%;">Unit</th>
+                                    <th style="width: 13%;">Batch #</th>
+                                    <th style="width: 10%;">Qty</th>
+                                    <th style="width: 11%;">Rate (₹)</th>
+                                    <th style="width: 9%;">Disc (₹)</th>
+                                    <th style="width: 7%;">GST %</th>
+                                    <th class="text-end" style="width: 10%;">Total (₹)</th>
+                                    <th class="text-center" style="width: 5%;"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -114,18 +115,28 @@
                                             <select name="items[{{ $idx }}][item_id]" class="form-select form-select-sm inv-item-select" required>
                                                 <option value="">Select Item</option>
                                                 @foreach($items as $it)
-                                                    <option value="{{ $it->id }}" data-min="{{ $it->min_price }}" data-normal="{{ $it->normal_price }}" data-max="{{ $it->max_price }}" data-gst="{{ $it->gst_percentage }}" data-unit="{{ $it->unit->symbol ?? '' }}" {{ $line->item_id == $it->id ? 'selected' : '' }}>
+                                                    <option value="{{ $it->id }}" data-min="{{ $it->min_price }}" data-normal="{{ $it->normal_price }}" data-max="{{ $it->max_price }}" data-gst="{{ $it->gst_percentage }}" data-unit-id="{{ $it->unit_id }}" data-unit="{{ $it->unit->symbol ?? '' }}" {{ $line->item_id == $it->id ? 'selected' : '' }}>
                                                         {{ $it->name }} ({{ $it->code }})
                                                     </option>
                                                 @endforeach
                                             </select>
-                                            <small class="text-muted item-unit-badge">{{ $line->item->unit->symbol ? 'Unit: ' . $line->item->unit->symbol : '' }}</small>
+                                            <small class="text-muted item-unit-badge">{{ $line->item->unit->symbol ? 'Base: ' . $line->item->unit->symbol : '' }}</small>
+                                        </td>
+                                        <td>
+                                            <select name="items[{{ $idx }}][unit_id]" class="form-select form-select-sm inv-unit-select">
+                                                <option value="">Item Base Unit</option>
+                                                @foreach($units as $u)
+                                                    <option value="{{ $u->id }}" {{ ($line->unit_id ?? $line->item->unit_id) == $u->id ? 'selected' : '' }}>
+                                                        {{ $u->name }} ({{ $u->symbol }})
+                                                    </option>
+                                                @endforeach
+                                            </select>
                                         </td>
                                         <td>
                                             <input type="text" name="items[{{ $idx }}][batch_number]" class="form-control form-control-sm" value="{{ $line->batch_number }}">
                                         </td>
                                         <td>
-                                            <input type="number" step="0.01" min="0.01" name="items[{{ $idx }}][quantity]" class="form-control form-control-sm inv-qty" value="{{ $line->quantity }}" required>
+                                            <input type="number" step="0.01" min="0.01" name="items[{{ $idx }}][quantity]" class="form-control form-control-sm inv-qty" value="{{ $line->entered_quantity ?: $line->quantity }}" required>
                                         </td>
                                         <td>
                                             <input type="number" step="0.01" min="0" name="items[{{ $idx }}][rate]" class="form-control form-control-sm inv-rate" value="{{ $line->rate }}" required>
@@ -233,11 +244,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const gst = selectedOpt.dataset.gst || 18;
             const unit = selectedOpt.dataset.unit || '';
+            const unitId = selectedOpt.dataset.unitId || '';
             const row = e.target.closest('.inv-row');
             row.querySelector('.inv-rate').value = price;
             row.querySelector('.inv-gst').value = gst;
+            const unitSelect = row.querySelector('.inv-unit-select');
+            if (unitSelect && unitId) {
+                unitSelect.value = unitId;
+            }
             const unitBadge = row.querySelector('.item-unit-badge');
-            if (unitBadge) unitBadge.innerText = unit ? 'Unit: ' + unit : '';
+            if (unitBadge) unitBadge.innerText = unit ? 'Base: ' + unit : '';
         }
         calculateTotal();
     });

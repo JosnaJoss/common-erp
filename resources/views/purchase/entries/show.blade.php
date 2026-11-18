@@ -99,7 +99,16 @@
                             <small class="text-muted">Code: {{ $line->item->code }} | HSN: {{ $line->item->hsn_code ?? '-' }}</small>
                         </td>
                         <td><span class="badge bg-light text-dark border">{{ $line->batch_number }}</span></td>
-                        <td class="text-end fw-bold">{{ number_format($line->quantity, 2) }} {{ $line->item->unit->symbol ?? '' }}</td>
+                        <td class="text-end fw-bold">
+                            @if($line->entered_quantity && $line->unit)
+                                {{ number_format($line->entered_quantity, 2) }} {{ $line->unit->symbol }}
+                                @if($line->unit_id !== $line->item->unit_id)
+                                    <br><small class="text-muted">({{ number_format($line->quantity, 2) }} {{ $line->item->unit->symbol ?? '' }})</small>
+                                @endif
+                            @else
+                                {{ number_format($line->quantity, 2) }} {{ $line->item->unit->symbol ?? '' }}
+                            @endif
+                        </td>
                         <td class="text-end">₹ {{ number_format($line->rate, 2) }}</td>
                         <td class="text-end fw-bold">₹ {{ number_format($line->line_total, 2) }}</td>
                     </tr>
@@ -120,6 +129,25 @@
                     <td colspan="5" class="text-end fw-bold">Input GST (Tax):</td>
                     <td class="text-end fw-bold">₹ {{ number_format($entry->tax_amount, 2) }}</td>
                 </tr>
+                @php
+                    $extraCharges = ($entry->freight_charges ?? 0) + ($entry->packaging_charges ?? 0) + ($entry->loading_charges ?? 0) + ($entry->other_charges ?? 0) + ($entry->round_off ?? 0);
+                @endphp
+                @if($extraCharges != 0)
+                <tr>
+                    <td colspan="5" class="text-end fw-bold text-secondary">
+                        Procurement & Landed Cost Additions:
+                        <small class="d-block text-muted">
+                            @if($entry->freight_charges > 0) Freight: ₹{{ number_format($entry->freight_charges, 2) }} | @endif
+                            @if($entry->packaging_charges > 0) Pkg: ₹{{ number_format($entry->packaging_charges, 2) }} | @endif
+                            @if($entry->loading_charges > 0) Loading: ₹{{ number_format($entry->loading_charges, 2) }} | @endif
+                            @if($entry->other_charges > 0) Other: ₹{{ number_format($entry->other_charges, 2) }} | @endif
+                            @if($entry->round_off != 0) Round-off: ₹{{ number_format($entry->round_off, 2) }} | @endif
+                            Method: {{ ucfirst(str_replace('_', ' ', $entry->charge_allocation_method ?? 'by_value')) }}
+                        </small>
+                    </td>
+                    <td class="text-end fw-bold text-secondary">₹ {{ number_format($extraCharges, 2) }}</td>
+                </tr>
+                @endif
                 <tr class="table-primary">
                     <td colspan="5" class="text-end fw-bold fs-6">Grand Total Payable:</td>
                     <td class="text-end fw-bold fs-6 text-primary">₹ {{ number_format($entry->grand_total, 2) }}</td>

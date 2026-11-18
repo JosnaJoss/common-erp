@@ -113,14 +113,15 @@
                         <table class="table table-bordered align-middle mb-0" id="billItemsTable">
                             <thead class="table-light small">
                                 <tr>
-                                    <th style="width: 28%;">Item & Unit</th>
-                                    <th style="width: 14%;">Batch #</th>
-                                    <th style="width: 12%;">Qty</th>
-                                    <th style="width: 14%;">Rate (₹)</th>
-                                    <th style="width: 12%;">Disc (₹)</th>
-                                    <th style="width: 10%;">GST %</th>
-                                    <th class="text-end" style="width: 14%;">Total (₹)</th>
-                                    <th class="text-center" style="width: 6%;"></th>
+                                    <th style="width: 24%;">Item</th>
+                                    <th style="width: 13%;">Unit</th>
+                                    <th style="width: 13%;">Batch #</th>
+                                    <th style="width: 10%;">Qty</th>
+                                    <th style="width: 11%;">Rate (₹)</th>
+                                    <th style="width: 9%;">Disc (₹)</th>
+                                    <th style="width: 7%;">GST %</th>
+                                    <th class="text-end" style="width: 10%;">Total (₹)</th>
+                                    <th class="text-center" style="width: 5%;"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -129,12 +130,20 @@
                                         <select name="items[0][item_id]" class="form-select form-select-sm bill-item-select" required>
                                             <option value="">Select Item</option>
                                             @foreach($items as $it)
-                                                <option value="{{ $it->id }}" data-rate="{{ $it->min_price ?? 0 }}" data-gst="{{ $it->gst_percentage }}" data-unit="{{ $it->unit->symbol ?? '' }}">
+                                                <option value="{{ $it->id }}" data-rate="{{ $it->min_price ?? 0 }}" data-gst="{{ $it->gst_percentage }}" data-unit-id="{{ $it->unit_id }}" data-unit="{{ $it->unit->symbol ?? '' }}">
                                                     {{ $it->name }} ({{ $it->code }})
                                                 </option>
                                             @endforeach
                                         </select>
                                         <small class="text-muted item-unit-badge"></small>
+                                    </td>
+                                    <td>
+                                        <select name="items[0][unit_id]" class="form-select form-select-sm bill-unit-select">
+                                            <option value="">Item Base Unit</option>
+                                            @foreach($units as $u)
+                                                <option value="{{ $u->id }}">{{ $u->name }} ({{ $u->symbol }})</option>
+                                            @endforeach
+                                        </select>
                                     </td>
                                     <td>
                                         <input type="text" name="items[0][batch_number]" class="form-control form-control-sm" value="BATCH-{{ date('Ymd') }}">
@@ -164,7 +173,45 @@
                         </table>
                     </div>
                 </div>
-                <div class="card-footer bg-light p-3">
+
+                <!-- Additional Charges & Landed Cost Allocation -->
+                <div class="card-body border-top bg-light p-3">
+                    <h6 class="fw-bold small text-secondary mb-3"><i class="bi bi-truck me-1"></i> Additional Procurement Charges & Landed Cost Allocation</h6>
+                    <div class="row g-2 mb-2">
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">Freight (₹)</label>
+                            <input type="number" step="0.01" min="0" name="freight_charges" id="freightInput" class="form-control form-control-sm add-charge" value="{{ old('freight_charges', 0) }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">Packaging (₹)</label>
+                            <input type="number" step="0.01" min="0" name="packaging_charges" id="packagingInput" class="form-control form-control-sm add-charge" value="{{ old('packaging_charges', 0) }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">Loading (₹)</label>
+                            <input type="number" step="0.01" min="0" name="loading_charges" id="loadingInput" class="form-control form-control-sm add-charge" value="{{ old('loading_charges', 0) }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">Other Charges (₹)</label>
+                            <input type="number" step="0.01" min="0" name="other_charges" id="otherInput" class="form-control form-control-sm add-charge" value="{{ old('other_charges', 0) }}">
+                        </div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-md-4">
+                            <label class="form-label small mb-1">Round-Off (₹)</label>
+                            <input type="number" step="0.01" name="round_off" id="roundOffInput" class="form-control form-control-sm" value="{{ old('round_off', 0) }}">
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small mb-1">Landed Cost Allocation Method</label>
+                            <select name="charge_allocation_method" class="form-select form-select-sm">
+                                <option value="by_value" {{ old('charge_allocation_method') == 'by_value' ? 'selected' : '' }}>Allocate by Value (Proportional to item cost - Recommended)</option>
+                                <option value="by_quantity" {{ old('charge_allocation_method') == 'by_quantity' ? 'selected' : '' }}>Allocate by Quantity (Proportional to units)</option>
+                                <option value="equal" {{ old('charge_allocation_method') == 'equal' ? 'selected' : '' }}>Allocate Equally (Split evenly across items)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-footer bg-light p-3 border-top">
                     <div class="row align-items-center">
                         <div class="col-md-5">
                             <label class="form-label small fw-bold mb-1">Additional Bill Discount (₹)</label>
@@ -173,7 +220,7 @@
                         </div>
                         <div class="col-md-7 text-end">
                             <div class="small text-muted">Subtotal: <span class="fw-semibold text-dark" id="displaySubtotal">₹ 0.00</span> | Total Discounts: <span class="fw-semibold text-danger" id="displayDiscount">-₹ 0.00</span></div>
-                            <div class="small text-muted">Total GST Tax: <span class="fw-semibold text-dark" id="displayTax">₹ 0.00</span></div>
+                            <div class="small text-muted">Total GST Tax: <span class="fw-semibold text-dark" id="displayTax">₹ 0.00</span> | Extra Charges: <span class="fw-semibold text-dark" id="displayExtraCharges">₹ 0.00</span></div>
                             <div class="fs-5 text-muted mt-1">Grand Total: <span class="fw-bold text-primary fs-4" id="billGrandTotal">₹ 0.00</span></div>
                         </div>
                     </div>
@@ -198,7 +245,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const displaySubtotal = document.getElementById('displaySubtotal');
     const displayDiscount = document.getElementById('displayDiscount');
     const displayTax = document.getElementById('displayTax');
+    const displayExtraCharges = document.getElementById('displayExtraCharges');
     const billDiscountInput = document.getElementById('billDiscountInput');
+    const freightInput = document.getElementById('freightInput');
+    const packagingInput = document.getElementById('packagingInput');
+    const loadingInput = document.getElementById('loadingInput');
+    const otherInput = document.getElementById('otherInput');
+    const roundOffInput = document.getElementById('roundOffInput');
     const paymentTypeSelect = document.getElementById('paymentTypeSelect');
     const immediatePaymentBlock = document.getElementById('immediatePaymentBlock');
     const amountPaidInput = document.getElementById('amountPaidInput');
@@ -238,11 +291,20 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const billDiscount = parseFloat(billDiscountInput.value) || 0;
         const totalDiscount = itemDiscountTotal + billDiscount;
-        const grandTotal = Math.max(0, (subtotal - totalDiscount) + taxTotal);
+
+        const freight = parseFloat(freightInput ? freightInput.value : 0) || 0;
+        const packaging = parseFloat(packagingInput ? packagingInput.value : 0) || 0;
+        const loading = parseFloat(loadingInput ? loadingInput.value : 0) || 0;
+        const other = parseFloat(otherInput ? otherInput.value : 0) || 0;
+        const roundOff = parseFloat(roundOffInput ? roundOffInput.value : 0) || 0;
+        const totalExtra = freight + packaging + loading + other + roundOff;
+
+        const grandTotal = Math.max(0, (subtotal - totalDiscount) + taxTotal + totalExtra);
 
         displaySubtotal.innerText = '₹ ' + subtotal.toFixed(2);
         displayDiscount.innerText = '-₹ ' + totalDiscount.toFixed(2);
         displayTax.innerText = '₹ ' + taxTotal.toFixed(2);
+        if (displayExtraCharges) displayExtraCharges.innerText = '₹ ' + totalExtra.toFixed(2);
         grandTotalSpan.innerText = '₹ ' + grandTotal.toLocaleString('en-IN', {minimumFractionDigits: 2, maximumFractionDigits: 2});
 
         if (paymentTypeSelect.value !== 'Credit' && (!amountPaidInput.value || parseFloat(amountPaidInput.value) === 0)) {
@@ -256,17 +318,27 @@ document.addEventListener('DOMContentLoaded', function() {
             const rate = selectedOpt.dataset.rate || 0;
             const gst = selectedOpt.dataset.gst || 18;
             const unit = selectedOpt.dataset.unit || '';
+            const unitId = selectedOpt.dataset.unitId || '';
             const row = e.target.closest('.bill-row');
             row.querySelector('.bill-rate').value = rate;
             row.querySelector('.bill-gst').value = gst;
+            const unitSelect = row.querySelector('.bill-unit-select');
+            if (unitSelect && unitId) {
+                unitSelect.value = unitId;
+            }
             const unitBadge = row.querySelector('.item-unit-badge');
-            if (unitBadge) unitBadge.innerText = unit ? 'Unit: ' + unit : '';
+            if (unitBadge) unitBadge.innerText = unit ? 'Base: ' + unit : '';
         }
         calculateTotal();
     });
 
     tableBody.addEventListener('input', calculateTotal);
     billDiscountInput.addEventListener('input', calculateTotal);
+    if (freightInput) freightInput.addEventListener('input', calculateTotal);
+    if (packagingInput) packagingInput.addEventListener('input', calculateTotal);
+    if (loadingInput) loadingInput.addEventListener('input', calculateTotal);
+    if (otherInput) otherInput.addEventListener('input', calculateTotal);
+    if (roundOffInput) roundOffInput.addEventListener('input', calculateTotal);
 
     addRowBtn.addEventListener('click', function() {
         const firstRow = document.querySelector('.bill-row');

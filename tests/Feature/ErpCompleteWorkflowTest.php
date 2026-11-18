@@ -154,6 +154,7 @@ class ErpCompleteWorkflowTest extends TestCase
             'customer_id' => $customer->id,
             'godown_id' => $godown->id,
             'invoice_date' => now()->toDateString(),
+            'payment_mode' => 'Credit',
             'payment_terms' => 'Net 30 Days',
             'due_date' => now()->addDays(30)->toDateString(),
             'remarks' => 'Automated test sales invoice',

@@ -16,6 +16,7 @@ class PettyCashVoucher extends Model
         'voucher_no',
         'voucher_date',
         'expense_category',
+        'category_id',
         'amount',
         'paid_to',
         'receipt_doc',
@@ -32,6 +33,11 @@ class PettyCashVoucher extends Model
     public function account()
     {
         return $this->belongsTo(PettyCashAccount::class, 'petty_cash_account_id');
+    }
+
+    public function category()
+    {
+        return $this->belongsTo(PettyCashCategory::class, 'category_id');
     }
 
     public function branch()

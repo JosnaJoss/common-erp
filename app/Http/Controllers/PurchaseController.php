@@ -318,9 +318,10 @@ class PurchaseController extends Controller
         $suppliers = Supplier::where('company_id', $companyId)->where('status', 'active')->get();
         $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
         $items = Item::where('company_id', $companyId)->where('status', 'active')->with('unit')->get();
+        $units = \App\Models\Unit::where('company_id', $companyId)->where('status', 'active')->get();
         $bankLedgers = Ledger::where('company_id', $companyId)->where('is_bank_or_cash', true)->where('status', 'active')->get();
 
-        return view('purchase.entries.create', compact('suppliers', 'godowns', 'items', 'bankLedgers'));
+        return view('purchase.entries.create', compact('suppliers', 'godowns', 'items', 'units', 'bankLedgers'));
     }
 
     public function entryStore(Request $request)
@@ -333,9 +334,16 @@ class PurchaseController extends Controller
             'invoice_date' => 'required|date',
             'payment_type' => 'required|in:Credit,Cash,Bank,UPI',
             'discount_amount' => 'nullable|numeric|min:0',
+            'freight_charges' => 'nullable|numeric|min:0',
+            'packaging_charges' => 'nullable|numeric|min:0',
+            'loading_charges' => 'nullable|numeric|min:0',
+            'other_charges' => 'nullable|numeric|min:0',
+            'round_off' => 'nullable|numeric',
+            'charge_allocation_method' => 'nullable|in:value,quantity,equal,none',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
+            'items.*.unit_id' => 'nullable|exists:units,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.expiry_date' => 'nullable|date',
             'items.*.quantity' => 'required|numeric|min:0.001',
@@ -349,11 +357,24 @@ class PurchaseController extends Controller
 
         return DB::transaction(function () use ($companyId, $data) {
             $billDiscount = (float)($data['discount_amount'] ?? 0);
+            $freight = (float)($data['freight_charges'] ?? 0);
+            $packaging = (float)($data['packaging_charges'] ?? 0);
+            $loading = (float)($data['loading_charges'] ?? 0);
+            $other = (float)($data['other_charges'] ?? 0);
+            $roundOff = (float)($data['round_off'] ?? 0);
+            $totalAdditionalCharges = $freight + $packaging + $loading + $other;
+            $allocMethod = $data['charge_allocation_method'] ?? 'value';
+
             $subtotal = 0;
             $totalItemDiscount = 0;
             $taxTotal = 0;
+            $processedItems = [];
+            $totalBaseQty = 0;
 
             foreach ($data['items'] as $it) {
+                $itemModel = Item::with('unit')->find($it['item_id']);
+                $conversion = \App\Services\UnitConversionService::convertToBaseQuantity($itemModel, (float)$it['quantity'], $it['unit_id'] ?? null);
+
                 $lineGross = (float)$it['quantity'] * (float)$it['rate'];
                 $lineDisc = (float)($it['discount_amount'] ?? 0);
                 $taxable = max(0, $lineGross - $lineDisc);
@@ -363,10 +384,23 @@ class PurchaseController extends Controller
                 $subtotal += $lineGross;
                 $totalItemDiscount += $lineDisc;
                 $taxTotal += $lineTax;
+                $totalBaseQty += $conversion['base_quantity'];
+
+                $processedItems[] = [
+                    'raw' => $it,
+                    'item' => $itemModel,
+                    'conversion' => $conversion,
+                    'line_gross' => $lineGross,
+                    'line_disc' => $lineDisc,
+                    'taxable' => $taxable,
+                    'tax_rate' => $taxRate,
+                    'line_tax' => $lineTax,
+                ];
             }
 
             $totalDiscount = $totalItemDiscount + $billDiscount;
-            $grandTotal = max(0, ($subtotal - $totalDiscount) + $taxTotal);
+            $netItemsPurchases = max(0, $subtotal - $totalDiscount);
+            $grandTotal = max(0, $netItemsPurchases + $taxTotal + $totalAdditionalCharges + $roundOff);
             $purNo = 'PUR-' . date('Y') . '-' . sprintf('%04d', PurchaseEntry::where('company_id', $companyId)->count() + 1);
 
             $paidAmount = 0;
@@ -389,6 +423,12 @@ class PurchaseController extends Controller
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxTotal,
                 'discount_amount' => $totalDiscount,
+                'freight_charges' => $freight,
+                'packaging_charges' => $packaging,
+                'loading_charges' => $loading,
+                'other_charges' => $other,
+                'round_off' => $roundOff,
+                'charge_allocation_method' => $allocMethod,
                 'grand_total' => $grandTotal,
                 'paid_amount' => $paidAmount,
                 'balance_amount' => $balanceAmount,
@@ -399,31 +439,49 @@ class PurchaseController extends Controller
             ]);
 
             $inventoryService = new InventoryService();
-            foreach ($data['items'] as $it) {
-                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
-                $lineDisc = (float)($it['discount_amount'] ?? 0);
-                $taxable = max(0, $lineGross - $lineDisc);
-                $taxRate = (float)($it['tax_percentage'] ?? 0);
-                $lineTax = $taxable * ($taxRate / 100);
+            $itemCount = count($processedItems);
+
+            foreach ($processedItems as $p) {
+                $it = $p['raw'];
+                $conversion = $p['conversion'];
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
+
+                // Calculate allocated landed charge for inventory unit cost
+                $allocatedCharge = 0;
+                if ($totalAdditionalCharges > 0 && $allocMethod !== 'none') {
+                    if ($allocMethod === 'quantity' && $totalBaseQty > 0) {
+                        $allocatedCharge = ($conversion['base_quantity'] / $totalBaseQty) * $totalAdditionalCharges;
+                    } elseif ($allocMethod === 'equal' && $itemCount > 0) {
+                        $allocatedCharge = $totalAdditionalCharges / $itemCount;
+                    } else { // 'value' default
+                        $allocatedCharge = $netItemsPurchases > 0 ? ($p['taxable'] / $netItemsPurchases) * $totalAdditionalCharges : 0;
+                    }
+                }
+
+                // Landed unit cost per base unit for stock valuation
+                $baseQty = max(0.001, $conversion['base_quantity']);
+                $landedUnitCost = ($p['taxable'] + $allocatedCharge) / $baseQty;
 
                 PurchaseEntryItem::create([
                     'purchase_entry_id' => $pe->id,
                     'item_id' => $it['item_id'],
+                    'unit_id' => $conversion['unit_id'],
+                    'entered_quantity' => $conversion['entered_quantity'],
+                    'base_quantity' => $conversion['base_quantity'],
                     'batch_number' => $batchNo,
                     'expiry_date' => $it['expiry_date'] ?? null,
-                    'quantity' => $it['quantity'],
+                    'quantity' => $conversion['base_quantity'],
                     'rate' => $it['rate'],
-                    'tax_percentage' => $taxRate,
-                    'tax_amount' => $lineTax,
-                    'discount_amount' => $lineDisc,
-                    'line_total' => $taxable + $lineTax,
+                    'tax_percentage' => $p['tax_rate'],
+                    'tax_amount' => $p['line_tax'],
+                    'discount_amount' => $p['line_disc'],
+                    'line_total' => $p['taxable'] + $p['line_tax'],
                 ]);
 
-                // Update stock inward
+                // Update stock inward using base quantity and landed unit cost
                 $inventoryService->recordInward(
                     $companyId, null, $data['godown_id'], $it['item_id'],
-                    $it['quantity'], $it['rate'], $batchNo, $it['expiry_date'] ?? null,
+                    $conversion['base_quantity'], $landedUnitCost, $batchNo, $it['expiry_date'] ?? null,
                     'PurchaseEntry', $pe->id, $purNo, "Inward for Purchase {$data['invoice_number']}"
                 );
             }
@@ -435,15 +493,43 @@ class PurchaseController extends Controller
             $supplier = Supplier::find($data['supplier_id']);
 
             if ($supplier && $supplier->ledger) {
-                $netPurchases = max(0, $subtotal - $totalDiscount);
+                $lines = [
+                    ['ledger_id' => $purchaseLedger->id, 'debit' => $netItemsPurchases, 'credit' => 0, 'narration' => 'Purchase of materials net of discount'],
+                    ['ledger_id' => $gstInputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Input GST'],
+                ];
+
+                // Additional charge lines
+                if ($freight > 0) {
+                    $freightLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Freight & Cartage Inward', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $freightLedger->id, 'debit' => $freight, 'credit' => 0, 'narration' => 'Freight charges on purchase'];
+                }
+                if ($packaging > 0) {
+                    $packLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Packaging & Forwarding Expenses', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $packLedger->id, 'debit' => $packaging, 'credit' => 0, 'narration' => 'Packaging charges on purchase'];
+                }
+                if ($loading > 0) {
+                    $loadLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Loading & Unloading Charges', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $loadLedger->id, 'debit' => $loading, 'credit' => 0, 'narration' => 'Loading/unloading charges'];
+                }
+                if ($other > 0) {
+                    $otherLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Procurement Other Charges', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $otherLedger->id, 'debit' => $other, 'credit' => 0, 'narration' => 'Other procurement charges'];
+                }
+                if ($roundOff != 0) {
+                    $roundLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Round-Off Adjustment', 'Administrative & Indirect Expenses', 'Expenses');
+                    if ($roundOff > 0) {
+                        $lines[] = ['ledger_id' => $roundLedger->id, 'debit' => $roundOff, 'credit' => 0, 'narration' => 'Round-off adjustment'];
+                    } else {
+                        $lines[] = ['ledger_id' => $roundLedger->id, 'debit' => 0, 'credit' => abs($roundOff), 'narration' => 'Round-off adjustment'];
+                    }
+                }
+
+                $lines[] = ['ledger_id' => $supplier->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Supplier Bill Payable'];
+
                 $jv = $accountingService->createJournalEntry(
                     $companyId, null, 'Purchase', $data['invoice_date'],
                     "Purchase Invoice {$data['invoice_number']} from {$supplier->name}",
-                    [
-                        ['ledger_id' => $purchaseLedger->id, 'debit' => $netPurchases, 'credit' => 0, 'narration' => 'Purchase of materials net of discount'],
-                        ['ledger_id' => $gstInputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Input GST'],
-                        ['ledger_id' => $supplier->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Supplier Bill Payable'],
-                    ],
+                    $lines,
                     'PurchaseEntry', $pe->id, $purNo
                 );
 
@@ -495,12 +581,13 @@ class PurchaseController extends Controller
             abort(403);
         }
 
-        $entry->load(['supplier', 'godown', 'items.item.unit']);
+        $entry->load(['supplier', 'godown', 'items.item.unit', 'items.unit']);
         $suppliers = Supplier::where('company_id', $companyId)->where('status', 'active')->get();
         $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
         $items = Item::where('company_id', $companyId)->where('status', 'active')->with('unit')->get();
+        $units = \App\Models\Unit::where('company_id', $companyId)->where('status', 'active')->get();
 
-        return view('purchase.entries.edit', compact('entry', 'suppliers', 'godowns', 'items'));
+        return view('purchase.entries.edit', compact('entry', 'suppliers', 'godowns', 'items', 'units'));
     }
 
     public function entryUpdate(Request $request, PurchaseEntry $entry)
@@ -517,9 +604,16 @@ class PurchaseController extends Controller
             'invoice_date' => 'required|date',
             'payment_type' => 'required|in:Credit,Cash,Bank,UPI',
             'discount_amount' => 'nullable|numeric|min:0',
+            'freight_charges' => 'nullable|numeric|min:0',
+            'packaging_charges' => 'nullable|numeric|min:0',
+            'loading_charges' => 'nullable|numeric|min:0',
+            'other_charges' => 'nullable|numeric|min:0',
+            'round_off' => 'nullable|numeric',
+            'charge_allocation_method' => 'nullable|in:value,quantity,equal,none',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
+            'items.*.unit_id' => 'nullable|exists:units,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.expiry_date' => 'nullable|date',
             'items.*.quantity' => 'required|numeric|min:0.001',
@@ -531,23 +625,37 @@ class PurchaseController extends Controller
         return DB::transaction(function () use ($companyId, $entry, $data) {
             $inventoryService = new InventoryService();
 
-            // 1. Revert previous stock inward for this entry's items
+            // 1. Revert previous stock inward for this entry's items (using base_quantity if available)
             foreach ($entry->items as $oldItem) {
+                $revertQty = (float)($oldItem->base_quantity ?: $oldItem->quantity);
                 $inventoryService->revertInward(
                     $entry->godown_id,
                     $oldItem->item_id,
-                    (float)$oldItem->quantity,
+                    $revertQty,
                     $oldItem->batch_number ?? 'DEFAULT'
                 );
             }
 
             // 2. Compute new totals
             $billDiscount = (float)($data['discount_amount'] ?? 0);
+            $freight = (float)($data['freight_charges'] ?? 0);
+            $packaging = (float)($data['packaging_charges'] ?? 0);
+            $loading = (float)($data['loading_charges'] ?? 0);
+            $other = (float)($data['other_charges'] ?? 0);
+            $roundOff = (float)($data['round_off'] ?? 0);
+            $totalAdditionalCharges = $freight + $packaging + $loading + $other;
+            $allocMethod = $data['charge_allocation_method'] ?? 'value';
+
             $subtotal = 0;
             $totalItemDiscount = 0;
             $taxTotal = 0;
+            $processedItems = [];
+            $totalBaseQty = 0;
 
             foreach ($data['items'] as $it) {
+                $itemModel = Item::with('unit')->find($it['item_id']);
+                $conversion = \App\Services\UnitConversionService::convertToBaseQuantity($itemModel, (float)$it['quantity'], $it['unit_id'] ?? null);
+
                 $lineGross = (float)$it['quantity'] * (float)$it['rate'];
                 $lineDisc = (float)($it['discount_amount'] ?? 0);
                 $taxable = max(0, $lineGross - $lineDisc);
@@ -557,10 +665,23 @@ class PurchaseController extends Controller
                 $subtotal += $lineGross;
                 $totalItemDiscount += $lineDisc;
                 $taxTotal += $lineTax;
+                $totalBaseQty += $conversion['base_quantity'];
+
+                $processedItems[] = [
+                    'raw' => $it,
+                    'item' => $itemModel,
+                    'conversion' => $conversion,
+                    'line_gross' => $lineGross,
+                    'line_disc' => $lineDisc,
+                    'taxable' => $taxable,
+                    'tax_rate' => $taxRate,
+                    'line_tax' => $lineTax,
+                ];
             }
 
             $totalDiscount = $totalItemDiscount + $billDiscount;
-            $grandTotal = max(0, ($subtotal - $totalDiscount) + $taxTotal);
+            $netItemsPurchases = max(0, $subtotal - $totalDiscount);
+            $grandTotal = max(0, $netItemsPurchases + $taxTotal + $totalAdditionalCharges + $roundOff);
             $paidAmount = (float)$entry->paid_amount;
             $balanceAmount = max(0, $grandTotal - $paidAmount);
             $paymentStatus = $balanceAmount == 0 && $paidAmount > 0 ? 'paid' : ($paidAmount > 0 ? 'partial' : 'unpaid');
@@ -575,6 +696,12 @@ class PurchaseController extends Controller
                 'subtotal' => $subtotal,
                 'tax_amount' => $taxTotal,
                 'discount_amount' => $totalDiscount,
+                'freight_charges' => $freight,
+                'packaging_charges' => $packaging,
+                'loading_charges' => $loading,
+                'other_charges' => $other,
+                'round_off' => $roundOff,
+                'charge_allocation_method' => $allocMethod,
                 'grand_total' => $grandTotal,
                 'balance_amount' => $balanceAmount,
                 'payment_status' => $paymentStatus,
@@ -583,32 +710,48 @@ class PurchaseController extends Controller
 
             // 4. Delete old line items and insert new line items
             $entry->items()->delete();
+            $itemCount = count($processedItems);
 
-            foreach ($data['items'] as $it) {
-                $lineGross = (float)$it['quantity'] * (float)$it['rate'];
-                $lineDisc = (float)($it['discount_amount'] ?? 0);
-                $taxable = max(0, $lineGross - $lineDisc);
-                $taxRate = (float)($it['tax_percentage'] ?? 0);
-                $lineTax = $taxable * ($taxRate / 100);
+            foreach ($processedItems as $p) {
+                $it = $p['raw'];
+                $conversion = $p['conversion'];
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
+
+                // Calculate allocated landed charge for inventory unit cost
+                $allocatedCharge = 0;
+                if ($totalAdditionalCharges > 0 && $allocMethod !== 'none') {
+                    if ($allocMethod === 'quantity' && $totalBaseQty > 0) {
+                        $allocatedCharge = ($conversion['base_quantity'] / $totalBaseQty) * $totalAdditionalCharges;
+                    } elseif ($allocMethod === 'equal' && $itemCount > 0) {
+                        $allocatedCharge = $totalAdditionalCharges / $itemCount;
+                    } else { // 'value' default
+                        $allocatedCharge = $netItemsPurchases > 0 ? ($p['taxable'] / $netItemsPurchases) * $totalAdditionalCharges : 0;
+                    }
+                }
+
+                $baseQty = max(0.001, $conversion['base_quantity']);
+                $landedUnitCost = ($p['taxable'] + $allocatedCharge) / $baseQty;
 
                 PurchaseEntryItem::create([
                     'purchase_entry_id' => $entry->id,
                     'item_id' => $it['item_id'],
+                    'unit_id' => $conversion['unit_id'],
+                    'entered_quantity' => $conversion['entered_quantity'],
+                    'base_quantity' => $conversion['base_quantity'],
                     'batch_number' => $batchNo,
                     'expiry_date' => $it['expiry_date'] ?? null,
-                    'quantity' => $it['quantity'],
+                    'quantity' => $conversion['base_quantity'],
                     'rate' => $it['rate'],
-                    'tax_percentage' => $taxRate,
-                    'tax_amount' => $lineTax,
-                    'discount_amount' => $lineDisc,
-                    'line_total' => $taxable + $lineTax,
+                    'tax_percentage' => $p['tax_rate'],
+                    'tax_amount' => $p['line_tax'],
+                    'discount_amount' => $p['line_disc'],
+                    'line_total' => $p['taxable'] + $p['line_tax'],
                 ]);
 
                 // Record inward to destination batch
                 $inventoryService->recordInward(
                     $companyId, null, $data['godown_id'], $it['item_id'],
-                    $it['quantity'], $it['rate'], $batchNo, $it['expiry_date'] ?? null,
+                    $conversion['base_quantity'], $landedUnitCost, $batchNo, $it['expiry_date'] ?? null,
                     'PurchaseEntry', $entry->id, $entry->purchase_number, "Inward for Purchase {$data['invoice_number']} (Updated)"
                 );
             }
@@ -620,16 +763,43 @@ class PurchaseController extends Controller
             $supplier = Supplier::find($data['supplier_id']);
 
             if ($supplier && $supplier->ledger && $entry->journalEntry) {
-                $netPurchases = max(0, $subtotal - $totalDiscount);
+                $lines = [
+                    ['ledger_id' => $purchaseLedger->id, 'debit' => $netItemsPurchases, 'credit' => 0, 'narration' => 'Purchase of materials net of discount'],
+                    ['ledger_id' => $gstInputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Input GST'],
+                ];
+
+                if ($freight > 0) {
+                    $freightLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Freight & Cartage Inward', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $freightLedger->id, 'debit' => $freight, 'credit' => 0, 'narration' => 'Freight charges on purchase'];
+                }
+                if ($packaging > 0) {
+                    $packLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Packaging & Forwarding Expenses', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $packLedger->id, 'debit' => $packaging, 'credit' => 0, 'narration' => 'Packaging charges on purchase'];
+                }
+                if ($loading > 0) {
+                    $loadLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Loading & Unloading Charges', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $loadLedger->id, 'debit' => $loading, 'credit' => 0, 'narration' => 'Loading/unloading charges'];
+                }
+                if ($other > 0) {
+                    $otherLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Procurement Other Charges', 'Direct Expenses & Purchases', 'Expenses');
+                    $lines[] = ['ledger_id' => $otherLedger->id, 'debit' => $other, 'credit' => 0, 'narration' => 'Other procurement charges'];
+                }
+                if ($roundOff != 0) {
+                    $roundLedger = $accountingService->getOrCreateStandardLedger($companyId, 'Round-Off Adjustment', 'Administrative & Indirect Expenses', 'Expenses');
+                    if ($roundOff > 0) {
+                        $lines[] = ['ledger_id' => $roundLedger->id, 'debit' => $roundOff, 'credit' => 0, 'narration' => 'Round-off adjustment'];
+                    } else {
+                        $lines[] = ['ledger_id' => $roundLedger->id, 'debit' => 0, 'credit' => abs($roundOff), 'narration' => 'Round-off adjustment'];
+                    }
+                }
+
+                $lines[] = ['ledger_id' => $supplier->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Supplier Bill Payable'];
+
                 $accountingService->updateJournalEntry(
                     $entry->journalEntry,
                     $data['invoice_date'],
                     "Purchase Invoice {$data['invoice_number']} from {$supplier->name} (Updated)",
-                    [
-                        ['ledger_id' => $purchaseLedger->id, 'debit' => $netPurchases, 'credit' => 0, 'narration' => 'Purchase of materials net of discount'],
-                        ['ledger_id' => $gstInputLedger->id, 'debit' => $taxTotal, 'credit' => 0, 'narration' => 'Input GST'],
-                        ['ledger_id' => $supplier->ledger->id, 'debit' => 0, 'credit' => $grandTotal, 'narration' => 'Supplier Bill Payable'],
-                    ]
+                    $lines
                 );
             }
 
@@ -684,6 +854,7 @@ class PurchaseController extends Controller
             'return_reason' => 'required|string',
             'items' => 'required|array|min:1',
             'items.*.item_id' => 'required|exists:items,id',
+            'items.*.unit_id' => 'nullable|exists:units,id',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.return_quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
@@ -693,14 +864,25 @@ class PurchaseController extends Controller
         return DB::transaction(function () use ($companyId, $data) {
             $subtotal = 0;
             $taxTotal = 0;
+            $processedItems = [];
 
             foreach ($data['items'] as $it) {
+                $itemModel = Item::with('unit')->find($it['item_id']);
+                $conversion = \App\Services\UnitConversionService::convertToBaseQuantity($itemModel, (float)$it['return_quantity'], $it['unit_id'] ?? null);
+
                 $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
                 $taxRate = (float)($it['tax_percentage'] ?? 0);
                 $lineTax = $lineSub * ($taxRate / 100);
 
                 $subtotal += $lineSub;
                 $taxTotal += $lineTax;
+
+                $processedItems[] = [
+                    'raw' => $it,
+                    'conversion' => $conversion,
+                    'line_sub' => $lineSub,
+                    'line_tax' => $lineTax,
+                ];
             }
 
             $grandTotal = $subtotal + $taxTotal;
@@ -720,26 +902,28 @@ class PurchaseController extends Controller
             ]);
 
             $inventoryService = new InventoryService();
-            foreach ($data['items'] as $it) {
-                $lineSub = (float)$it['return_quantity'] * (float)$it['rate'];
-                $taxRate = (float)($it['tax_percentage'] ?? 0);
-                $lineTax = $lineSub * ($taxRate / 100);
+            foreach ($processedItems as $p) {
+                $it = $p['raw'];
+                $conversion = $p['conversion'];
                 $batchNo = !empty($it['batch_number']) ? $it['batch_number'] : 'DEFAULT';
 
                 PurchaseReturnItem::create([
                     'purchase_return_id' => $pr->id,
                     'item_id' => $it['item_id'],
+                    'unit_id' => $conversion['unit_id'],
+                    'entered_quantity' => $conversion['entered_quantity'],
+                    'base_quantity' => $conversion['base_quantity'],
                     'batch_number' => $batchNo,
-                    'return_quantity' => $it['return_quantity'],
+                    'return_quantity' => $conversion['base_quantity'],
                     'rate' => $it['rate'],
-                    'tax_amount' => $lineTax,
-                    'total_amount' => $lineSub + $lineTax,
+                    'tax_amount' => $p['line_tax'],
+                    'total_amount' => $p['line_sub'] + $p['line_tax'],
                 ]);
 
-                // Deduct stock outward for purchase return
+                // Deduct stock outward for purchase return using base quantity
                 $inventoryService->recordOutward(
                     $companyId, null, $data['godown_id'], $it['item_id'],
-                    (float)$it['return_quantity'], $batchNo,
+                    (float)$conversion['base_quantity'], $batchNo,
                     'PurchaseReturn', $pr->id, $retNo,
                     "Purchase Return {$retNo}: {$data['return_reason']}"
                 );

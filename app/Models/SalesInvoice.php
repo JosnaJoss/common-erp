@@ -38,6 +38,21 @@ class SalesInvoice extends Model
         'stock_updated' => 'boolean',
     ];
 
+    public function company()
+    {
+        return $this->belongsTo(Company::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
+    public function creator()
+    {
+        return $this->belongsTo(User::class, 'created_by');
+    }
+
     public function customer()
     {
         return $this->belongsTo(Customer::class);

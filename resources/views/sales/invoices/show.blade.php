@@ -21,7 +21,10 @@
             <i class="bi bi-arrow-return-left me-1"></i> Credit Note / Return
         </a>
         <a href="{{ route('sales.invoices.print', $invoice) }}" target="_blank" class="btn btn-outline-dark">
-            <i class="bi bi-printer me-1"></i> Official Print View
+            <i class="bi bi-printer me-1"></i> Print View
+        </a>
+        <a href="{{ route('sales.invoices.pdf', $invoice) }}" class="btn btn-outline-primary">
+            <i class="bi bi-file-earmark-pdf me-1"></i> Download PDF
         </a>
         @if($invoice->balance_amount > 0)
             <a href="{{ route('sales.collections.index') }}" class="btn btn-success">
@@ -99,7 +102,16 @@
                             <small class="text-muted">Code: {{ $line->item->code }} | HSN: {{ $line->item->hsn_code ?? '-' }}</small>
                         </td>
                         <td><span class="badge bg-light text-dark border">{{ $line->batch_number }}</span></td>
-                        <td class="text-end fw-bold">{{ number_format($line->quantity, 2) }} {{ $line->item->unit->symbol ?? '' }}</td>
+                        <td class="text-end fw-bold">
+                            @if($line->entered_quantity && $line->unit)
+                                {{ number_format($line->entered_quantity, 2) }} {{ $line->unit->symbol }}
+                                @if($line->unit_id !== $line->item->unit_id)
+                                    <br><small class="text-muted">({{ number_format($line->quantity, 2) }} {{ $line->item->unit->symbol ?? '' }})</small>
+                                @endif
+                            @else
+                                {{ number_format($line->quantity, 2) }} {{ $line->item->unit->symbol ?? '' }}
+                            @endif
+                        </td>
                         <td class="text-end">₹ {{ number_format($line->rate, 2) }}</td>
                         <td class="text-end fw-bold text-dark">₹ {{ number_format($line->line_total, 2) }}</td>
                     </tr>

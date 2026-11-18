@@ -13,6 +13,8 @@ class PurchaseEntryItem extends Model
         'purchase_entry_id',
         'item_id',
         'unit_id',
+        'entered_quantity',
+        'base_quantity',
         'batch_number',
         'expiry_date',
         'weight',
