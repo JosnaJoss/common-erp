@@ -2,19 +2,15 @@
 
 namespace Tests\Feature;
 
-use App\Models\Bom;
-use App\Models\Category;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Item;
-use App\Models\JournalEntry;
-use App\Models\JournalLine;
-use App\Models\ProductionOrder;
+use App\Models\Product;
 use App\Models\PurchaseEntry;
-use App\Models\QualityCheck;
 use App\Models\SalesInvoice;
 use App\Models\Staff;
 use App\Models\Supplier;
+use App\Models\Unit;
 use App\Models\User;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Tests\TestCase;
@@ -32,107 +28,71 @@ class MultiIndustryDemoTest extends TestCase
     }
 
     /**
-     * Test all three sample companies exist with their branches, departments, and godowns.
+     * Test all 12 fresh industry demo companies exist with full infrastructure.
      */
-    public function test_all_sample_companies_exist_with_infrastructure(): void
+    public function test_all_12_industry_companies_exist_with_complete_infrastructure(): void
     {
-        $companies = [
-            'ELEG-BOUTIQUE' => ['name' => 'Elegance Boutique', 'type' => 'retail', 'branches' => 3, 'godowns' => 4],
-            'KANCHINAD-FOODS' => ['name' => 'Kanchinad Foods', 'type' => 'manufacturing', 'branches' => 3, 'godowns' => 4],
-            'AQUAFRESH-BEV' => ['name' => 'AquaFresh Beverages', 'type' => 'manufacturing', 'branches' => 3, 'godowns' => 4],
+        $expectedIndustries = [
+            'MALABAR-FOODS'    => ['name' => 'Malabar Taste Foods Pvt. Ltd.', 'type' => 'manufacturing'],
+            'AQUAFRESH-BEV'    => ['name' => 'AquaFresh Beverages Pvt. Ltd.', 'type' => 'manufacturing'],
+            'ELEGANT-STITCH'   => ['name' => 'Elegant Stitch Boutique', 'type' => 'retail'],
+            'ROYAL-WOOD'       => ['name' => 'Royal Wood Furniture Works', 'type' => 'manufacturing'],
+            'BUILDRIGHT-CONST' => ['name' => 'BuildRight Constructions', 'type' => 'service'],
+            'DRIVECARE-AUTO'   => ['name' => 'DriveCare Automobile Services', 'type' => 'service'],
+            'GREENFIELD-AGRO'  => ['name' => 'GreenField Agro Farms', 'type' => 'distribution'],
+            'CAREPLUS-MED'     => ['name' => 'CarePlus Medical Centre', 'type' => 'service'],
+            'PRINTPRO-PACK'    => ['name' => 'PrintPro Packaging Solutions', 'type' => 'manufacturing'],
+            'PRIMETRADE-DIST'  => ['name' => 'PrimeTrade Wholesale Distributors', 'type' => 'wholesale'],
+            'GLOWCARE-PERS'    => ['name' => 'GlowCare Personal Products', 'type' => 'manufacturing'],
+            'HERITAGE-GOLD'    => ['name' => 'Heritage Gold & Diamonds', 'type' => 'retail'],
         ];
 
-        foreach ($companies as $code => $expected) {
+        foreach ($expectedIndustries as $code => $expected) {
             $company = Company::where('code', $code)->first();
             $this->assertNotNull($company, "Company with code {$code} must exist.");
             $this->assertEquals($expected['name'], $company->name);
             $this->assertEquals($expected['type'], $company->business_type);
-            $this->assertGreaterThanOrEqual($expected['branches'], $company->branches()->count());
-            $this->assertGreaterThanOrEqual($expected['godowns'], $company->godowns()->count());
+            $this->assertGreaterThanOrEqual(3, $company->branches()->count(), "{$code} should have at least 3 branches.");
+            $this->assertGreaterThanOrEqual(5, $company->departments()->count(), "{$code} should have at least 5 departments.");
+            $this->assertGreaterThanOrEqual(3, $company->godowns()->count(), "{$code} should have at least 3 godowns.");
+            $this->assertGreaterThanOrEqual(5, Unit::where('company_id', $company->id)->count(), "{$code} should have units of measurement.");
+            $this->assertGreaterThanOrEqual(6, Item::where('company_id', $company->id)->count(), "{$code} should have items.");
+            $this->assertGreaterThanOrEqual(3, Supplier::where('company_id', $company->id)->count(), "{$code} should have suppliers.");
+            $this->assertGreaterThanOrEqual(4, Customer::where('company_id', $company->id)->count(), "{$code} should have customers.");
+            $this->assertGreaterThanOrEqual(5, Staff::where('company_id', $company->id)->count(), "{$code} should have staff.");
+            $this->assertGreaterThanOrEqual(4, User::where('company_id', $company->id)->count(), "{$code} should have demo users.");
         }
     }
 
     /**
-     * Test Elegance Boutique (Retail / Fashion): items, inventory, transactions, and company isolation.
+     * Test Food Manufacturing company (Malabar Foods) master data and clean transaction state.
      */
-    public function test_elegance_boutique_retail_workflow_and_isolation(): void
+    public function test_malabar_foods_manufacturing_master_data_and_clean_state(): void
     {
-        $company = Company::where('code', 'ELEG-BOUTIQUE')->firstOrFail();
+        $company = Company::where('code', 'MALABAR-FOODS')->firstOrFail();
         $branch = $company->branches()->firstOrFail();
 
-        // 1. Check Items
+        // 1. Raw Materials & Finished Products
         $items = Item::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(20, $items->count());
-        $this->assertTrue($items->contains('code', 'ITM-SAR-KAN-RED'));
-        $this->assertTrue($items->contains('code', 'ITM-KRT-FLR-M'));
+        $this->assertGreaterThanOrEqual(6, $items->count());
+        $this->assertTrue($items->contains('code', 'RM-PEP-01'));
+        $this->assertTrue($items->contains('code', 'FG-GM-250'));
 
-        // 2. Check Customers and Suppliers
+        // 2. Customers and Suppliers with Ledgers
         $customers = Customer::where('company_id', $company->id)->get();
         $suppliers = Supplier::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(10, $customers->count());
-        $this->assertGreaterThanOrEqual(5, $suppliers->count());
+        $this->assertGreaterThanOrEqual(4, $customers->count());
+        $this->assertGreaterThanOrEqual(3, $suppliers->count());
+        foreach ($customers as $c) {
+            $this->assertNotNull($c->ledger_id, "Customer {$c->name} must have a dedicated debtor ledger.");
+        }
+        foreach ($suppliers as $s) {
+            $this->assertNotNull($s->ledger_id, "Supplier {$s->name} must have a dedicated creditor ledger.");
+        }
 
-        // 3. Check Purchases and Sales
-        $purchases = PurchaseEntry::where('company_id', $company->id)->get();
-        $sales = SalesInvoice::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(10, $purchases->count());
-        $this->assertGreaterThanOrEqual(15, $sales->count());
-
-        // 4. Check Retail company has NO BOM or Production Orders
-        $this->assertEquals(0, Bom::where('company_id', $company->id)->count());
-        $this->assertEquals(0, ProductionOrder::where('company_id', $company->id)->count());
-
-        // 5. Test Switching Context and Dashboard Rendering
-        $response = $this->actingAs($this->superAdmin)
-            ->withSession([
-                'active_company_id' => $company->id,
-                'active_branch_id' => $branch->id,
-            ])
-            ->get('/dashboard');
-
-        $response->assertStatus(200);
-
-        // 6. Test Company Isolation: Boutique user/context should not see Kanchinad or AquaFresh products
-        $kanchinadCompany = Company::where('code', 'KANCHINAD-FOODS')->firstOrFail();
-        $kanchinadItem = Item::where('company_id', $kanchinadCompany->id)->firstOrFail();
-
-        $this->assertDatabaseMissing('items', [
-            'company_id' => $company->id,
-            'id' => $kanchinadItem->id,
-        ]);
-
-        // 7. Double-entry Trial Balance Verification
-        $journalIds = JournalEntry::where('company_id', $company->id)->pluck('id');
-        $this->assertNotEmpty($journalIds);
-        $totalDebit = JournalLine::whereIn('journal_entry_id', $journalIds)->sum('debit_amount');
-        $totalCredit = JournalLine::whereIn('journal_entry_id', $journalIds)->sum('credit_amount');
-        $this->assertEqualsWithDelta($totalDebit, $totalCredit, 0.01, "Trial balance for Elegance Boutique must balance.");
-    }
-
-    /**
-     * Test Kanchinad Foods (Food Processing / Curry Masala Manufacturing):
-     * Raw materials, BOM recipes, production orders, quality checks, and sales.
-     */
-    public function test_kanchinad_foods_manufacturing_workflow_and_isolation(): void
-    {
-        $company = Company::where('code', 'KANCHINAD-FOODS')->firstOrFail();
-        $branch = $company->branches()->firstOrFail();
-
-        // 1. Raw Materials and Finished Spices
-        $items = Item::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(20, $items->count());
-        $this->assertTrue($items->contains('code', 'ITM-RAW-CHL')); // Whole red chilli
-        $this->assertTrue($items->contains('code', 'ITM-FND-CHL-500')); // Chilli powder 500g
-
-        // 2. BOM Recipes
-        $boms = Bom::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(4, $boms->count());
-
-        // 3. Production Orders & QC
-        $prodOrders = ProductionOrder::where('company_id', $company->id)->get();
-        $qcChecks = QualityCheck::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(4, $prodOrders->count());
-        $this->assertGreaterThanOrEqual(3, $qcChecks->count());
+        // 3. Transactions must be strictly zero for clean manual testing
+        $this->assertEquals(0, PurchaseEntry::where('company_id', $company->id)->count());
+        $this->assertEquals(0, SalesInvoice::where('company_id', $company->id)->count());
 
         // 4. Test Switching Context and Dashboard Rendering
         $response = $this->actingAs($this->superAdmin)
@@ -143,45 +103,50 @@ class MultiIndustryDemoTest extends TestCase
             ->get('/dashboard');
 
         $response->assertStatus(200);
-
-        // 5. Double-entry Trial Balance Verification
-        $journalIds = JournalEntry::where('company_id', $company->id)->pluck('id');
-        $this->assertNotEmpty($journalIds);
-        $totalDebit = JournalLine::whereIn('journal_entry_id', $journalIds)->sum('debit_amount');
-        $totalCredit = JournalLine::whereIn('journal_entry_id', $journalIds)->sum('credit_amount');
-        $this->assertEqualsWithDelta($totalDebit, $totalCredit, 0.01, "Trial balance for Kanchinad Foods must balance.");
     }
 
     /**
-     * Test AquaFresh Beverages (Water Purification & Carbonated Drinks):
-     * Preforms, water, club soda, dispenser cans, BOM, production batches, and distribution.
+     * Test Tailoring & Garments Boutique (Elegant Stitch) master data and clean transaction state.
      */
-    public function test_aquafresh_beverages_production_and_distribution_workflow(): void
+    public function test_elegant_stitch_boutique_master_data_and_clean_state(): void
+    {
+        $company = Company::where('code', 'ELEGANT-STITCH')->firstOrFail();
+        $branch = $company->branches()->firstOrFail();
+
+        $items = Item::where('company_id', $company->id)->get();
+        $this->assertGreaterThanOrEqual(6, $items->count());
+        $this->assertTrue($items->contains('code', 'RM-SILK-01'));
+        $this->assertTrue($items->contains('code', 'FG-SHER-01'));
+
+        $this->assertEquals(0, PurchaseEntry::where('company_id', $company->id)->count());
+        $this->assertEquals(0, SalesInvoice::where('company_id', $company->id)->count());
+
+        $response = $this->actingAs($this->superAdmin)
+            ->withSession([
+                'active_company_id' => $company->id,
+                'active_branch_id' => $branch->id,
+            ])
+            ->get('/dashboard');
+
+        $response->assertStatus(200);
+    }
+
+    /**
+     * Test AquaFresh Beverages master data and clean transaction state.
+     */
+    public function test_aquafresh_beverages_master_data_and_clean_state(): void
     {
         $company = Company::where('code', 'AQUAFRESH-BEV')->firstOrFail();
         $branch = $company->branches()->firstOrFail();
 
-        // 1. Items Check
         $items = Item::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(20, $items->count());
-        $this->assertTrue($items->contains('code', 'ITM-FND-CAN-20L')); // 20L Can
-        $this->assertTrue($items->contains('code', 'ITM-FND-SDA-750')); // Club Soda
+        $this->assertGreaterThanOrEqual(6, $items->count());
+        $this->assertTrue($items->contains('code', 'RM-PET-20G'));
+        $this->assertTrue($items->contains('code', 'FG-AQ-1L-CS'));
 
-        // 2. BOM Recipes & Production
-        $boms = Bom::where('company_id', $company->id)->get();
-        $prodOrders = ProductionOrder::where('company_id', $company->id)->get();
-        $qcChecks = QualityCheck::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(4, $boms->count());
-        $this->assertGreaterThanOrEqual(4, $prodOrders->count());
-        $this->assertGreaterThanOrEqual(3, $qcChecks->count());
+        $this->assertEquals(0, PurchaseEntry::where('company_id', $company->id)->count());
+        $this->assertEquals(0, SalesInvoice::where('company_id', $company->id)->count());
 
-        // 3. Customers and Distribution Sales
-        $customers = Customer::where('company_id', $company->id)->get();
-        $sales = SalesInvoice::where('company_id', $company->id)->get();
-        $this->assertGreaterThanOrEqual(10, $customers->count());
-        $this->assertGreaterThanOrEqual(15, $sales->count());
-
-        // 4. Test Switching Context and Dashboard Rendering
         $response = $this->actingAs($this->superAdmin)
             ->withSession([
                 'active_company_id' => $company->id,
@@ -190,21 +155,14 @@ class MultiIndustryDemoTest extends TestCase
             ->get('/dashboard');
 
         $response->assertStatus(200);
-
-        // 5. Double-entry Trial Balance Verification
-        $journalIds = JournalEntry::where('company_id', $company->id)->pluck('id');
-        $this->assertNotEmpty($journalIds);
-        $totalDebit = JournalLine::whereIn('journal_entry_id', $journalIds)->sum('debit_amount');
-        $totalCredit = JournalLine::whereIn('journal_entry_id', $journalIds)->sum('credit_amount');
-        $this->assertEqualsWithDelta($totalDebit, $totalCredit, 0.01, "Trial balance for AquaFresh Beverages must balance.");
     }
 
     /**
-     * Test Company Context Switching via Route.
+     * Test Company Context Switching across fresh demo companies.
      */
     public function test_super_admin_can_switch_between_sample_companies(): void
     {
-        $companies = Company::whereIn('code', ['ELEG-BOUTIQUE', 'KANCHINAD-FOODS', 'AQUAFRESH-BEV'])->get();
+        $companies = Company::whereIn('code', ['MALABAR-FOODS', 'AQUAFRESH-BEV', 'ELEGANT-STITCH', 'HERITAGE-GOLD'])->get();
 
         foreach ($companies as $company) {
             $response = $this->actingAs($this->superAdmin)

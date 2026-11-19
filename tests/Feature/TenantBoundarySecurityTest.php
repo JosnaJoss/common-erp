@@ -39,8 +39,9 @@ class TenantBoundarySecurityTest extends TestCase
 
         $this->user = User::where('email', 'admin@erp.com')->first();
         $this->companyA = Company::where('code', 'APEX-IND')->first();
-        $this->companyB = Company::where('code', 'ELEG-BOUTIQUE')->first() 
-            ?? Company::where('code', 'KANCHINAD-FOODS')->first()
+        $this->companyB = Company::where('code', 'MALABAR-FOODS')->first()
+            ?? Company::where('code', 'AQUAFRESH-BEV')->first()
+            ?? Company::where('code', 'ELEGANT-STITCH')->first()
             ?? Company::where('id', '!=', $this->companyA->id)->first();
 
         $this->assertNotNull($this->user, 'Admin user must exist.');
