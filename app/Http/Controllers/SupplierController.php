@@ -88,17 +88,32 @@ class SupplierController extends Controller
 
     public function show(Supplier $supplier)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($supplier->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company supplier.');
+        }
+
         $supplier->load(['ledger.journalLines.entry', 'purchaseEntries', 'payments']);
         return view('suppliers.show', compact('supplier'));
     }
 
     public function edit(Supplier $supplier)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($supplier->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company supplier.');
+        }
+
         return view('suppliers.edit', compact('supplier'));
     }
 
     public function update(Request $request, Supplier $supplier)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($supplier->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company supplier.');
+        }
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
@@ -125,6 +140,11 @@ class SupplierController extends Controller
 
     public function destroy(Supplier $supplier)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($supplier->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company supplier.');
+        }
+
         $supplier->delete();
         AuditLog::log('supplier', 'delete', "Deleted supplier {$supplier->name}");
         return redirect()->route('suppliers.index')->with('success', 'Supplier deleted successfully.');

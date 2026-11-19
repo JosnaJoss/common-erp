@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class StaffAdvanceLoanController extends Controller
 {
@@ -58,11 +59,17 @@ class StaffAdvanceLoanController extends Controller
         $companyId = CompanyContextService::getActiveCompanyId();
 
         $data = $request->validate([
-            'staff_id' => 'required|exists:staff,id',
+            'staff_id' => [
+                'required',
+                Rule::exists('staff', 'id')->where('company_id', $companyId),
+            ],
             'advance_date' => 'required|date',
             'amount' => 'required|numeric|min:1',
             'payment_mode' => 'required|in:Bank Transfer,Cash,Cheque,UPI',
-            'ledger_id' => 'required|exists:ledgers,id',
+            'ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'reference_no' => 'nullable|string|max:100',
             'reason' => 'required|string|max:255',
         ]);
@@ -166,13 +173,19 @@ class StaffAdvanceLoanController extends Controller
         $companyId = CompanyContextService::getActiveCompanyId();
 
         $data = $request->validate([
-            'staff_id' => 'required|exists:staff,id',
+            'staff_id' => [
+                'required',
+                Rule::exists('staff', 'id')->where('company_id', $companyId),
+            ],
             'loan_date' => 'required|date',
             'principal_amount' => 'required|numeric|min:100',
             'interest_rate' => 'nullable|numeric|min:0|max:100',
             'repayment_months' => 'required|integer|min:1|max:120',
             'start_month' => 'required|date_format:Y-m',
-            'disbursed_ledger_id' => 'required|exists:ledgers,id',
+            'disbursed_ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
         ]);
 
         $staff = Staff::where('company_id', $companyId)->findOrFail($data['staff_id']);

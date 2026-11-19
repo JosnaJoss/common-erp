@@ -11,6 +11,7 @@ use App\Models\Ledger;
 use App\Services\AccountingService;
 use App\Services\CompanyContextService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AccountsController extends Controller
 {
@@ -55,7 +56,10 @@ class AccountsController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'account_group_id' => 'required|exists:account_groups,id',
+            'account_group_id' => [
+                'required',
+                Rule::exists('account_groups', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'nullable|string|max:50',
             'opening_balance' => 'required|numeric',
@@ -80,6 +84,11 @@ class AccountsController extends Controller
 
     public function ledgerStatement(Request $request, Ledger $ledger)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($ledger->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company ledger statement.');
+        }
+
         $startDate = $request->get('start_date', now()->startOfYear()->toDateString());
         $endDate = $request->get('end_date', now()->toDateString());
 
@@ -126,7 +135,10 @@ class AccountsController extends Controller
             'voucher_date' => 'required|date',
             'narration' => 'nullable|string',
             'lines' => 'required|array|min:2',
-            'lines.*.ledger_id' => 'required|exists:ledgers,id',
+            'lines.*.ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'lines.*.debit' => 'nullable|numeric|min:0',
             'lines.*.credit' => 'nullable|numeric|min:0',
             'lines.*.narration' => 'nullable|string',
@@ -152,6 +164,11 @@ class AccountsController extends Controller
 
     public function journalShow(JournalEntry $entry)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($entry->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company journal entry.');
+        }
+
         $entry->load(['lines.ledger.accountGroup', 'creator', 'company']);
         return view('accounts.vouchers.show', compact('entry'));
     }

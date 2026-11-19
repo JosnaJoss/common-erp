@@ -11,6 +11,7 @@ use App\Models\Route;
 use App\Services\AccountingService;
 use App\Services\CompanyContextService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class CustomerController extends Controller
 {
@@ -59,8 +60,14 @@ class CustomerController extends Controller
             'pincode' => 'nullable|string|max:20',
             'city' => 'nullable|string|max:100',
             'territory' => 'nullable|string|max:100',
-            'route_id' => 'nullable|exists:routes,id',
-            'location_id' => 'nullable|exists:locations,id',
+            'route_id' => [
+                'nullable',
+                Rule::exists('routes', 'id')->where('company_id', $companyId),
+            ],
+            'location_id' => [
+                'nullable',
+                Rule::exists('locations', 'id')->where('company_id', $companyId),
+            ],
             'gst_number' => 'nullable|string|max:50',
             'pan_number' => 'nullable|string|max:50',
             'price_level' => 'required|in:minimum,normal,maximum',
@@ -102,6 +109,11 @@ class CustomerController extends Controller
 
     public function show(Customer $customer)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($customer->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company customer.');
+        }
+
         $customer->load(['ledger.journalLines.entry', 'salesInvoices', 'collections']);
         return view('customers.show', compact('customer'));
     }
@@ -109,6 +121,10 @@ class CustomerController extends Controller
     public function edit(Customer $customer)
     {
         $companyId = CompanyContextService::getActiveCompanyId();
+        if ($customer->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company customer.');
+        }
+
         $routes = Route::where('company_id', $companyId)->where('status', 'active')->get();
         $locations = Location::where('company_id', $companyId)->where('status', 'active')->get();
         return view('customers.edit', compact('customer', 'routes', 'locations'));
@@ -116,6 +132,11 @@ class CustomerController extends Controller
 
     public function update(Request $request, Customer $customer)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($customer->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company customer.');
+        }
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
@@ -126,8 +147,14 @@ class CustomerController extends Controller
             'pincode' => 'nullable|string|max:20',
             'city' => 'nullable|string|max:100',
             'territory' => 'nullable|string|max:100',
-            'route_id' => 'nullable|exists:routes,id',
-            'location_id' => 'nullable|exists:locations,id',
+            'route_id' => [
+                'nullable',
+                Rule::exists('routes', 'id')->where('company_id', $companyId),
+            ],
+            'location_id' => [
+                'nullable',
+                Rule::exists('locations', 'id')->where('company_id', $companyId),
+            ],
             'gst_number' => 'nullable|string|max:50',
             'pan_number' => 'nullable|string|max:50',
             'price_level' => 'required|in:minimum,normal,maximum',
@@ -146,6 +173,11 @@ class CustomerController extends Controller
 
     public function destroy(Customer $customer)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($customer->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company customer.');
+        }
+
         $customer->delete();
         AuditLog::log('customer', 'delete', "Deleted customer {$customer->name}");
         return redirect()->route('customers.index')->with('success', 'Customer deleted successfully.');

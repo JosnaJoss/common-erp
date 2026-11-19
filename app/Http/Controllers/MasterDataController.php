@@ -35,7 +35,10 @@ class MasterDataController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
             'address' => 'nullable|string',
@@ -54,8 +57,16 @@ class MasterDataController extends Controller
 
     public function departmentUpdate(Request $request, Department $department)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($department->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company department.');
+        }
+
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
             'address' => 'nullable|string',
@@ -72,6 +83,11 @@ class MasterDataController extends Controller
 
     public function departmentDestroy(Department $department)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($department->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company department.');
+        }
+
         $department->delete();
         AuditLog::log('master', 'delete', "Deleted department {$department->name}");
         return back()->with('success', 'Department deleted successfully.');
@@ -90,7 +106,10 @@ class MasterDataController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
             'address' => 'nullable|string',
@@ -108,8 +127,16 @@ class MasterDataController extends Controller
 
     public function godownUpdate(Request $request, Godown $godown)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($godown->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company godown.');
+        }
+
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
             'address' => 'nullable|string',
@@ -125,6 +152,11 @@ class MasterDataController extends Controller
 
     public function godownDestroy(Godown $godown)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($godown->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company godown.');
+        }
+
         $godown->delete();
         AuditLog::log('master', 'delete', "Deleted godown {$godown->name}");
         return back()->with('success', 'Godown deleted successfully.');
@@ -158,6 +190,11 @@ class MasterDataController extends Controller
 
     public function unitUpdate(Request $request, Unit $unit)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($unit->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company unit.');
+        }
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'symbol' => 'required|string|max:20',
@@ -433,10 +470,22 @@ class MasterDataController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'category_id' => 'nullable|exists:categories,id',
-            'subcategory_id' => 'nullable|exists:subcategories,id',
-            'product_id' => 'nullable|exists:products,id',
-            'unit_id' => 'nullable|exists:units,id',
+            'category_id' => [
+                'nullable',
+                Rule::exists('categories', 'id')->where('company_id', $companyId),
+            ],
+            'subcategory_id' => [
+                'nullable',
+                Rule::exists('subcategories', 'id')->where('company_id', $companyId),
+            ],
+            'product_id' => [
+                'nullable',
+                Rule::exists('products', 'id')->where('company_id', $companyId),
+            ],
+            'unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
             'item_type' => 'required|in:sales_item,raw_material,both',
@@ -450,7 +499,10 @@ class MasterDataController extends Controller
             'status' => 'required|in:active,inactive',
             'opening_stock' => 'nullable|numeric|min:0',
             'opening_unit_cost' => 'nullable|numeric|min:0',
-            'opening_godown_id' => 'nullable|exists:godowns,id',
+            'opening_godown_id' => [
+                'nullable',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
         ]);
 
         $itemData = collect($data)->except(['opening_stock', 'opening_unit_cost', 'opening_godown_id'])->toArray();
@@ -482,6 +534,10 @@ class MasterDataController extends Controller
     public function itemEdit(Item $item)
     {
         $companyId = CompanyContextService::getActiveCompanyId();
+        if ($item->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company item.');
+        }
+
         $categories = Category::where('company_id', $companyId)->where('status', 'active')->get();
         $subcategories = Subcategory::where('company_id', $companyId)->where('status', 'active')->get();
         $products = Product::where('company_id', $companyId)->where('status', 'active')->get();
@@ -491,11 +547,28 @@ class MasterDataController extends Controller
 
     public function itemUpdate(Request $request, Item $item)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($item->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company item.');
+        }
+
         $data = $request->validate([
-            'category_id' => 'nullable|exists:categories,id',
-            'subcategory_id' => 'nullable|exists:subcategories,id',
-            'product_id' => 'nullable|exists:products,id',
-            'unit_id' => 'nullable|exists:units,id',
+            'category_id' => [
+                'nullable',
+                Rule::exists('categories', 'id')->where('company_id', $companyId),
+            ],
+            'subcategory_id' => [
+                'nullable',
+                Rule::exists('subcategories', 'id')->where('company_id', $companyId),
+            ],
+            'product_id' => [
+                'nullable',
+                Rule::exists('products', 'id')->where('company_id', $companyId),
+            ],
+            'unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',
             'item_type' => 'required|in:sales_item,raw_material,both',
@@ -516,6 +589,11 @@ class MasterDataController extends Controller
 
     public function itemDestroy(Item $item)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($item->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company item.');
+        }
+
         $item->delete();
         AuditLog::log('master', 'delete', "Deleted Item {$item->name}");
         return redirect()->route('master.items.index')->with('success', 'Item deleted successfully.');

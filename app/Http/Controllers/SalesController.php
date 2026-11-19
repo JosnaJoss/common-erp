@@ -23,6 +23,7 @@ use App\Services\CompanyContextService;
 use App\Services\InventoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class SalesController extends Controller
 {
@@ -58,16 +59,24 @@ class SalesController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'customer_id' => 'required|exists:customers,id',
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('company_id', $companyId),
+            ],
             'order_date' => 'required|date',
             'expected_delivery_date' => 'nullable|date',
             'notes' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.selling_price' => 'required|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $customer = Customer::where('company_id', $companyId)->findOrFail($data['customer_id']);
 
         $orderNo = 'SO-' . date('Y') . '-' . sprintf('%04d', SalesOrder::where('company_id', $companyId)->count() + 1);
 
@@ -123,6 +132,11 @@ class SalesController extends Controller
 
     public function orderShow(SalesOrder $order)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($order->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company sales order.');
+        }
+
         $order->load(['customer', 'items.item.unit', 'invoices', 'deliveries']);
         return view('sales.orders.show', compact('order'));
     }
@@ -162,9 +176,18 @@ class SalesController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'customer_id' => 'required|exists:customers,id',
-            'godown_id' => 'required|exists:godowns,id',
-            'sales_order_id' => 'nullable|exists:sales_orders,id',
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'sales_order_id' => [
+                'nullable',
+                Rule::exists('sales_orders', 'id')->where('company_id', $companyId),
+            ],
             'invoice_date' => 'required|date',
             'payment_terms' => 'nullable|string|max:100',
             'due_date' => 'nullable|date',
@@ -172,17 +195,30 @@ class SalesController extends Controller
             'discount_amount' => 'nullable|numeric|min:0',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
-            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
-            'receipt_ledger_id' => 'nullable|required_if:payment_mode,Cash,Bank Transfer,UPI,Cheque|exists:ledgers,id',
+            'receipt_ledger_id' => [
+                'nullable',
+                'required_if:payment_mode,Cash,Bank Transfer,UPI,Cheque',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'amount_collected' => 'nullable|numeric|min:0',
             'transaction_reference' => 'nullable|string|max:100',
         ]);
+
+        $customer = Customer::where('company_id', $companyId)->findOrFail($data['customer_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         return DB::transaction(function () use ($companyId, $data) {
             $billDiscount = (float)($data['discount_amount'] ?? 0);
@@ -366,26 +402,41 @@ class SalesController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         if ($invoice->company_id != $companyId) {
-            abort(403);
+            abort(403, 'Unauthorized access to cross-company sales invoice.');
         }
 
         $data = $request->validate([
-            'customer_id' => 'required|exists:customers,id',
-            'godown_id' => 'required|exists:godowns,id',
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'invoice_date' => 'required|date',
             'payment_terms' => 'nullable|string|max:100',
             'due_date' => 'nullable|date',
             'discount_amount' => 'nullable|numeric|min:0',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
-            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $customer = Customer::where('company_id', $companyId)->findOrFail($data['customer_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         return DB::transaction(function () use ($companyId, $invoice, $data) {
             $inventoryService = new InventoryService();
@@ -514,6 +565,11 @@ class SalesController extends Controller
 
     public function invoiceShow(SalesInvoice $invoice)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($invoice->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company sales invoice.');
+        }
+
         $invoice->load(['customer', 'godown', 'items.item.unit', 'journalEntry.lines.ledger', 'collections', 'company', 'returns.items.item']);
         return view('sales.invoices.show', compact('invoice'));
     }
@@ -551,20 +607,38 @@ class SalesController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'customer_id' => 'required|exists:customers,id',
-            'godown_id' => 'required|exists:godowns,id',
-            'sales_invoice_id' => 'nullable|exists:sales_invoices,id',
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'sales_invoice_id' => [
+                'nullable',
+                Rule::exists('sales_invoices', 'id')->where('company_id', $companyId),
+            ],
             'return_date' => 'required|date',
             'return_reason' => 'required|string',
             'stock_condition' => 'required|in:accept_to_stock,damaged_scrap',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
-            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.return_quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $customer = Customer::where('company_id', $companyId)->findOrFail($data['customer_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         return DB::transaction(function () use ($companyId, $data) {
             $subtotal = 0;
@@ -680,18 +754,33 @@ class SalesController extends Controller
 
     public function returnShow(SalesReturn $return)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($return->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company sales return.');
+        }
+
         $return->load(['customer', 'invoice', 'godown', 'items.item.unit', 'journalEntry.lines.ledger']);
         return view('sales.returns.show', compact('return'));
     }
 
     public function invoicePrint(SalesInvoice $invoice)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($invoice->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company sales invoice.');
+        }
+
         $invoice->load(['customer', 'godown', 'items.item.unit', 'company']);
         return view('sales.invoices.print', compact('invoice'));
     }
 
     public function invoicePdf(SalesInvoice $invoice)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($invoice->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company sales invoice.');
+        }
+
         $invoice->load(['customer', 'godown', 'items.item.unit', 'company']);
         $pdf = \Barryvdh\DomPDF\Facade\Pdf::loadView('sales.invoices.pdf', compact('invoice'));
         return $pdf->download("invoice_{$invoice->invoice_number}.pdf");
@@ -716,10 +805,22 @@ class SalesController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'customer_id' => 'required|exists:customers,id',
-            'sales_invoice_id' => 'nullable|exists:sales_invoices,id',
-            'vehicle_id' => 'required|exists:vehicles,id',
-            'route_id' => 'required|exists:routes,id',
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('company_id', $companyId),
+            ],
+            'sales_invoice_id' => [
+                'nullable',
+                Rule::exists('sales_invoices', 'id')->where('company_id', $companyId),
+            ],
+            'vehicle_id' => [
+                'required',
+                Rule::exists('vehicles', 'id')->where('company_id', $companyId),
+            ],
+            'route_id' => [
+                'required',
+                Rule::exists('routes', 'id')->where('company_id', $companyId),
+            ],
             'assigned_driver' => 'required|string|max:100',
             'delivery_date' => 'required|date',
             'delivery_address' => 'required|string',
@@ -749,6 +850,11 @@ class SalesController extends Controller
 
     public function deliveryUpdateStatus(Request $request, SalesDelivery $delivery)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($delivery->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company delivery.');
+        }
+
         $data = $request->validate([
             'delivery_status' => 'required|in:assigned,in_transit,delivered,failed',
         ]);
@@ -776,12 +882,21 @@ class SalesController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'customer_id' => 'required|exists:customers,id',
-            'sales_invoice_id' => 'nullable|exists:sales_invoices,id',
+            'customer_id' => [
+                'required',
+                Rule::exists('customers', 'id')->where('company_id', $companyId),
+            ],
+            'sales_invoice_id' => [
+                'nullable',
+                Rule::exists('sales_invoices', 'id')->where('company_id', $companyId),
+            ],
             'collection_date' => 'required|date',
             'collection_amount' => 'required|numeric|min:1',
             'payment_mode' => 'required|in:Cash,Bank Transfer,Cheque,UPI,Other',
-            'receipt_ledger_id' => 'required|exists:ledgers,id',
+            'receipt_ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'transaction_reference' => 'nullable|string|max:100',
             'collected_by' => 'nullable|string|max:100',
             'remarks' => 'nullable|string',

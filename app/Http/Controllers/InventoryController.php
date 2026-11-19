@@ -16,6 +16,7 @@ use App\Services\CompanyContextService;
 use App\Services\InventoryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class InventoryController extends Controller
 {
@@ -75,8 +76,14 @@ class InventoryController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'godown_id' => 'required|exists:godowns,id',
-            'item_id' => 'required|exists:items,id',
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'quantity' => 'required|numeric|min:0.001',
             'unit_cost' => 'required|numeric|min:0',
             'batch_no' => 'nullable|string|max:50',
@@ -111,8 +118,14 @@ class InventoryController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'godown_id' => 'required|exists:godowns,id',
-            'item_id' => 'required|exists:items,id',
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'quantity' => 'required|numeric|min:0.001',
             'batch_no' => 'nullable|string|max:50',
             'reference_type' => 'required|string',
@@ -154,9 +167,19 @@ class InventoryController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'source_godown_id' => 'required|exists:godowns,id',
-            'dest_godown_id' => 'required|exists:godowns,id|different:source_godown_id',
-            'item_id' => 'required|exists:items,id',
+            'source_godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'dest_godown_id' => [
+                'required',
+                'different:source_godown_id',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'quantity' => 'required|numeric|min:0.001',
             'batch_no' => 'nullable|string|max:50',
             'transfer_date' => 'required|date',
@@ -227,6 +250,11 @@ class InventoryController extends Controller
 
     public function transferDispatch(StockTransfer $transfer)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($transfer->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company stock transfer.');
+        }
+
         try {
             $inventoryService = new InventoryService();
             $inventoryService->dispatchTransfer($transfer, auth()->id() ?? 1);
@@ -239,6 +267,11 @@ class InventoryController extends Controller
 
     public function transferReceive(StockTransfer $transfer)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($transfer->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company stock transfer.');
+        }
+
         try {
             $inventoryService = new InventoryService();
             $inventoryService->receiveTransfer($transfer, auth()->id() ?? 1);
@@ -267,8 +300,14 @@ class InventoryController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'godown_id' => 'required|exists:godowns,id',
-            'item_id' => 'required|exists:items,id',
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'actual_stock' => 'required|numeric|min:0',
             'reason' => 'required|string',
         ]);
@@ -366,9 +405,15 @@ class InventoryController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'godown_id' => 'required|exists:godowns,id',
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'items.*.quantity' => 'nullable|numeric|min:0',
             'items.*.unit_cost' => 'nullable|numeric|min:0',
         ]);

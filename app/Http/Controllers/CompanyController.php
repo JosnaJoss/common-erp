@@ -138,8 +138,9 @@ class CompanyController extends Controller
 
     public function switchBranch(Request $request)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
         $branchId = (int)$request->input('branch_id');
-        $branch = Branch::findOrFail($branchId);
+        $branch = Branch::where('company_id', $companyId)->findOrFail($branchId);
 
         session(['active_branch_id' => $branch->id]);
 
@@ -149,6 +150,11 @@ class CompanyController extends Controller
     // Branch CRUD
     public function branchStore(Request $request, Company $company)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($company->id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company branch creation.');
+        }
+
         $data = $request->validate([
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:50',

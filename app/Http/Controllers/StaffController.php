@@ -10,6 +10,7 @@ use App\Models\Staff;
 use App\Models\StaffDocument;
 use App\Services\CompanyContextService;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class StaffController extends Controller
 {
@@ -55,8 +56,14 @@ class StaffController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
-            'department_id' => 'nullable|exists:departments,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
+            'department_id' => [
+                'nullable',
+                Rule::exists('departments', 'id')->where('company_id', $companyId),
+            ],
             'employee_id' => 'required|string|max:50',
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -115,6 +122,11 @@ class StaffController extends Controller
 
     public function show(Staff $staff)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($staff->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company staff.');
+        }
+
         $staff->load(['department', 'branch', 'attendances' => function ($q) {
             $q->latest('attendance_date')->take(10);
         }, 'payrolls' => function ($q) {
@@ -127,6 +139,10 @@ class StaffController extends Controller
     public function edit(Staff $staff)
     {
         $companyId = CompanyContextService::getActiveCompanyId();
+        if ($staff->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company staff.');
+        }
+
         $departments = Department::where('company_id', $companyId)->where('status', 'active')->get();
         $branches = Branch::where('company_id', $companyId)->where('status', 'active')->get();
         return view('staff.edit', compact('staff', 'departments', 'branches'));
@@ -134,9 +150,20 @@ class StaffController extends Controller
 
     public function update(Request $request, Staff $staff)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($staff->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company staff.');
+        }
+
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
-            'department_id' => 'nullable|exists:departments,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
+            'department_id' => [
+                'nullable',
+                Rule::exists('departments', 'id')->where('company_id', $companyId),
+            ],
             'employee_id' => 'required|string|max:50',
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -193,6 +220,11 @@ class StaffController extends Controller
 
     public function destroy(Staff $staff)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($staff->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company staff.');
+        }
+
         $staff->delete();
         AuditLog::log('staff', 'delete', "Deleted staff member {$staff->full_name}");
         return redirect()->route('staff.index')->with('success', 'Staff member deleted successfully.');
@@ -200,6 +232,11 @@ class StaffController extends Controller
 
     public function uploadDocument(Request $request, Staff $staff)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($staff->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company staff.');
+        }
+
         $request->validate([
             'document_type' => 'required|string|max:100',
             'title' => 'required|string|max:255',

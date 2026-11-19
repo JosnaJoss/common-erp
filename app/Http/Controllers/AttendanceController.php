@@ -13,6 +13,7 @@ use App\Models\Staff;
 use App\Services\CompanyContextService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class AttendanceController extends Controller
 {
@@ -38,7 +39,7 @@ class AttendanceController extends Controller
         $records = $request->input('attendance', []);
 
         foreach ($records as $staffId => $data) {
-            $staff = Staff::find($staffId);
+            $staff = Staff::where('company_id', $companyId)->find($staffId);
             if (!$staff) continue;
 
             $status = $data['status'] ?? 'Present';
@@ -144,7 +145,10 @@ class AttendanceController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'staff_id' => 'required|exists:staff,id',
+            'staff_id' => [
+                'required',
+                Rule::exists('staff', 'id')->where('company_id', $companyId),
+            ],
             'date' => 'required|date',
             'overtime_hours' => 'required|numeric|min:0.5',
             'overtime_rate' => 'required|numeric|min:0',
@@ -162,6 +166,11 @@ class AttendanceController extends Controller
 
     public function overtimeApprove(Overtime $overtime)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($overtime->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company overtime.');
+        }
+
         $overtime->update([
             'approval_status' => 'approved',
             'approved_by' => auth()->id(),

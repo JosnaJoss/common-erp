@@ -25,6 +25,7 @@ use App\Services\CompanyContextService;
 use App\Services\InventoryService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class PurchaseController extends Controller
 {
@@ -46,13 +47,19 @@ class PurchaseController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'department_id' => 'required|exists:departments,id',
+            'department_id' => [
+                'required',
+                Rule::exists('departments', 'id')->where('company_id', $companyId),
+            ],
             'requested_by' => 'required|string|max:100',
             'priority' => 'required|in:Low,Medium,High,Urgent',
             'expected_delivery_date' => 'nullable|date',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'items.*.quantity' => 'required|numeric|min:0.001',
         ]);
 
@@ -85,6 +92,11 @@ class PurchaseController extends Controller
 
     public function requestApprove(Request $request, PurchaseRequest $purchaseRequest)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($purchaseRequest->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company purchase request.');
+        }
+
         $purchaseRequest->update([
             'status' => 'approved',
             'approved_by' => auth()->id(),
@@ -129,17 +141,28 @@ class PurchaseController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'purchase_request_id' => 'nullable|exists:purchase_requests,id',
+            'supplier_id' => [
+                'required',
+                Rule::exists('suppliers', 'id')->where('company_id', $companyId),
+            ],
+            'purchase_request_id' => [
+                'nullable',
+                Rule::exists('purchase_requests', 'id')->where('company_id', $companyId),
+            ],
             'po_date' => 'required|date',
             'expected_delivery_date' => 'nullable|date',
             'terms_and_conditions' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $supplier = Supplier::where('company_id', $companyId)->findOrFail($data['supplier_id']);
 
         $poNo = 'PO-' . date('Y') . '-' . sprintf('%04d', PurchaseOrder::where('company_id', $companyId)->count() + 1);
 
@@ -201,6 +224,11 @@ class PurchaseController extends Controller
 
     public function orderShow(PurchaseOrder $order)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($order->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company purchase order.');
+        }
+
         $order->load(['supplier', 'items.item.unit', 'grns']);
         return view('purchase.orders.show', compact('order'));
     }
@@ -233,19 +261,34 @@ class PurchaseController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'godown_id' => 'required|exists:godowns,id',
-            'purchase_order_id' => 'nullable|exists:purchase_orders,id',
+            'supplier_id' => [
+                'required',
+                Rule::exists('suppliers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'purchase_order_id' => [
+                'nullable',
+                Rule::exists('purchase_orders', 'id')->where('company_id', $companyId),
+            ],
             'received_date' => 'required|date',
             'received_by' => 'required|string|max:100',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
             'items.*.ordered_quantity' => 'nullable|numeric|min:0',
             'items.*.received_quantity' => 'required|numeric|min:0.001',
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.expiry_date' => 'nullable|date',
         ]);
+
+        $supplier = Supplier::where('company_id', $companyId)->findOrFail($data['supplier_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         $grnNo = 'GRN-' . date('Y') . '-' . sprintf('%04d', GoodsReceiptNote::where('company_id', $companyId)->count() + 1);
 
@@ -292,6 +335,11 @@ class PurchaseController extends Controller
 
     public function grnShow(GoodsReceiptNote $grn)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($grn->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company GRN.');
+        }
+
         $grn->load(['supplier', 'godown', 'items.item.unit', 'purchaseOrder']);
         return view('purchase.grn.show', compact('grn'));
     }
@@ -328,8 +376,14 @@ class PurchaseController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'godown_id' => 'required|exists:godowns,id',
+            'supplier_id' => [
+                'required',
+                Rule::exists('suppliers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'invoice_number' => 'required|string|max:100',
             'invoice_date' => 'required|date',
             'payment_type' => 'required|in:Credit,Cash,Bank,UPI',
@@ -342,18 +396,31 @@ class PurchaseController extends Controller
             'charge_allocation_method' => 'nullable|in:value,quantity,equal,none',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
-            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.expiry_date' => 'nullable|date',
             'items.*.quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
             'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
-            'payment_ledger_id' => 'nullable|required_if:payment_type,Cash,Bank,UPI|exists:ledgers,id',
+            'payment_ledger_id' => [
+                'nullable',
+                'required_if:payment_type,Cash,Bank,UPI',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'amount_paid' => 'nullable|numeric|min:0',
             'transaction_reference' => 'nullable|string|max:100',
         ]);
+
+        $supplier = Supplier::where('company_id', $companyId)->findOrFail($data['supplier_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         return DB::transaction(function () use ($companyId, $data) {
             $billDiscount = (float)($data['discount_amount'] ?? 0);
@@ -598,8 +665,14 @@ class PurchaseController extends Controller
         }
 
         $data = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'godown_id' => 'required|exists:godowns,id',
+            'supplier_id' => [
+                'required',
+                Rule::exists('suppliers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'invoice_number' => 'required|string|max:100',
             'invoice_date' => 'required|date',
             'payment_type' => 'required|in:Credit,Cash,Bank,UPI',
@@ -612,8 +685,14 @@ class PurchaseController extends Controller
             'charge_allocation_method' => 'nullable|in:value,quantity,equal,none',
             'remarks' => 'nullable|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
-            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.expiry_date' => 'nullable|date',
             'items.*.quantity' => 'required|numeric|min:0.001',
@@ -621,6 +700,9 @@ class PurchaseController extends Controller
             'items.*.discount_amount' => 'nullable|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $supplier = Supplier::where('company_id', $companyId)->findOrFail($data['supplier_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         return DB::transaction(function () use ($companyId, $entry, $data) {
             $inventoryService = new InventoryService();
@@ -810,6 +892,11 @@ class PurchaseController extends Controller
 
     public function entryShow(PurchaseEntry $entry)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($entry->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company purchase bill.');
+        }
+
         $entry->load(['supplier', 'godown', 'items.item.unit', 'journalEntry.lines.ledger', 'payments', 'returns.items.item']);
         return view('purchase.entries.show', compact('entry'));
     }
@@ -847,19 +934,37 @@ class PurchaseController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'godown_id' => 'required|exists:godowns,id',
-            'purchase_entry_id' => 'nullable|exists:purchase_entries,id',
+            'supplier_id' => [
+                'required',
+                Rule::exists('suppliers', 'id')->where('company_id', $companyId),
+            ],
+            'godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'purchase_entry_id' => [
+                'nullable',
+                Rule::exists('purchase_entries', 'id')->where('company_id', $companyId),
+            ],
             'return_date' => 'required|date',
             'return_reason' => 'required|string',
             'items' => 'required|array|min:1',
-            'items.*.item_id' => 'required|exists:items,id',
-            'items.*.unit_id' => 'nullable|exists:units,id',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.unit_id' => [
+                'nullable',
+                Rule::exists('units', 'id')->where('company_id', $companyId),
+            ],
             'items.*.batch_number' => 'nullable|string|max:50',
             'items.*.return_quantity' => 'required|numeric|min:0.001',
             'items.*.rate' => 'required|numeric|min:0',
             'items.*.tax_percentage' => 'nullable|numeric|min:0|max:100',
         ]);
+
+        $supplier = Supplier::where('company_id', $companyId)->findOrFail($data['supplier_id']);
+        $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         return DB::transaction(function () use ($companyId, $data) {
             $subtotal = 0;
@@ -969,6 +1074,11 @@ class PurchaseController extends Controller
 
     public function returnShow(PurchaseReturn $return)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($return->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company purchase return.');
+        }
+
         $return->load(['supplier', 'godown', 'purchaseEntry', 'items.item.unit', 'journalEntry.lines.ledger']);
         return view('purchase.returns.show', compact('return'));
     }
@@ -991,12 +1101,21 @@ class PurchaseController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'supplier_id' => 'required|exists:suppliers,id',
-            'purchase_entry_id' => 'nullable|exists:purchase_entries,id',
+            'supplier_id' => [
+                'required',
+                Rule::exists('suppliers', 'id')->where('company_id', $companyId),
+            ],
+            'purchase_entry_id' => [
+                'nullable',
+                Rule::exists('purchase_entries', 'id')->where('company_id', $companyId),
+            ],
             'payment_date' => 'required|date',
             'payment_amount' => 'required|numeric|min:1',
             'payment_mode' => 'required|in:Cash,Bank Transfer,Cheque,UPI,Other',
-            'payment_ledger_id' => 'required|exists:ledgers,id',
+            'payment_ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'transaction_reference' => 'nullable|string|max:100',
             'remarks' => 'nullable|string',
         ]);

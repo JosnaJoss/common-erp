@@ -18,6 +18,7 @@ use Carbon\Carbon;
 use Exception;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class PayrollController extends Controller
 {
@@ -206,6 +207,11 @@ class PayrollController extends Controller
 
     public function payslip(Payroll $payroll)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($payroll->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company payslip.');
+        }
+
         $payroll->load(['staff.department', 'company', 'journalEntry']);
         return view('staff.payroll.payslip', compact('payroll'));
     }
@@ -219,7 +225,10 @@ class PayrollController extends Controller
 
         $data = $request->validate([
             'payment_mode' => 'required|in:Cash,Bank Transfer,Cheque',
-            'payment_ledger_id' => 'required|exists:ledgers,id',
+            'payment_ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'payment_date' => 'required|date',
             'transaction_reference' => 'nullable|string|max:100',
         ]);
@@ -238,9 +247,14 @@ class PayrollController extends Controller
 
         $data = $request->validate([
             'payroll_ids' => 'required|array|min:1',
-            'payroll_ids.*' => 'exists:payrolls,id',
+            'payroll_ids.*' => [
+                Rule::exists('payrolls', 'id')->where('company_id', $companyId),
+            ],
             'payment_mode' => 'required|in:Cash,Bank Transfer,Cheque',
-            'payment_ledger_id' => 'required|exists:ledgers,id',
+            'payment_ledger_id' => [
+                'required',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
             'payment_date' => 'required|date',
             'transaction_reference' => 'nullable|string|max:100',
         ]);

@@ -14,6 +14,7 @@ use App\Services\CompanyContextService;
 use App\Services\DailyOperationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 
 class DailyOperationController extends Controller
 {
@@ -86,12 +87,21 @@ class DailyOperationController extends Controller
         $activeBranchId = CompanyContextService::getActiveBranchId();
 
         $validated = $request->validate([
-            'department_id' => 'required|exists:departments,id',
+            'department_id' => [
+                'required',
+                Rule::exists('departments', 'id')->where('company_id', $companyId),
+            ],
             'operation_date' => 'required|date',
             'process_name' => 'required|string|max:100',
             'work_order_ref' => 'nullable|string|max:100',
-            'department_head_id' => 'nullable|exists:staff,id',
-            'supervisor_id' => 'nullable|exists:staff,id',
+            'department_head_id' => [
+                'nullable',
+                Rule::exists('staff', 'id')->where('company_id', $companyId),
+            ],
+            'supervisor_id' => [
+                'nullable',
+                Rule::exists('staff', 'id')->where('company_id', $companyId),
+            ],
             'work_description' => 'nullable|string',
             'start_time' => 'nullable',
             'end_time' => 'nullable',
@@ -101,7 +111,10 @@ class DailyOperationController extends Controller
 
             // Employees
             'employees' => 'nullable|array',
-            'employees.*.staff_id' => 'required|exists:staff,id',
+            'employees.*.staff_id' => [
+                'required',
+                Rule::exists('staff', 'id')->where('company_id', $companyId),
+            ],
             'employees.*.employment_type' => 'required|in:salaried,daily_wage,hourly,contract,piece_rate',
             'employees.*.hours_worked' => 'required|numeric|min:0',
             'employees.*.units_completed' => 'nullable|numeric|min:0',
@@ -110,8 +123,14 @@ class DailyOperationController extends Controller
 
             // Materials consumed
             'materials' => 'nullable|array',
-            'materials.*.item_id' => 'required|exists:items,id',
-            'materials.*.source_godown_id' => 'required|exists:godowns,id',
+            'materials.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'materials.*.source_godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'materials.*.batch_no' => 'nullable|string',
             'materials.*.opening_quantity' => 'nullable|numeric|min:0',
             'materials.*.issued_quantity' => 'nullable|numeric|min:0',
@@ -123,8 +142,14 @@ class DailyOperationController extends Controller
 
             // Outputs produced
             'outputs' => 'nullable|array',
-            'outputs.*.item_id' => 'required|exists:items,id',
-            'outputs.*.dest_godown_id' => 'required|exists:godowns,id',
+            'outputs.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'outputs.*.dest_godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'outputs.*.batch_number' => 'nullable|string',
             'outputs.*.produced_quantity' => 'required|numeric|min:0.001',
             'outputs.*.rejected_quantity' => 'nullable|numeric|min:0',
@@ -147,8 +172,14 @@ class DailyOperationController extends Controller
 
             // Distributions
             'distributions' => 'nullable|array',
-            'distributions.*.item_id' => 'required|exists:items,id',
-            'distributions.*.destination_godown_id' => 'required|exists:godowns,id',
+            'distributions.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'distributions.*.destination_godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
             'distributions.*.destination_type' => 'required|in:factory_sales_counter,head_office_warehouse,delivery_van,branch_warehouse,packing_warehouse,other',
             'distributions.*.batch_no' => 'nullable|string',
             'distributions.*.quantity' => 'required|numeric|min:0.001',
@@ -189,6 +220,11 @@ class DailyOperationController extends Controller
      */
     public function show(DailyOperation $daily_operation)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($daily_operation->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company daily operation.');
+        }
+
         $daily_operation->load([
             'company', 'branch', 'department', 'departmentHead', 'supervisor', 'approver', 'creator',
             'employees.staff',
@@ -207,6 +243,11 @@ class DailyOperationController extends Controller
      */
     public function submit(DailyOperation $daily_operation)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($daily_operation->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company daily operation.');
+        }
+
         try {
             $this->operationService->submitOperation($daily_operation, auth()->id() ?? 1);
             AuditLog::log('daily_operations', 'submit', "Submitted Daily Operation #{$daily_operation->operation_number}");
@@ -221,6 +262,11 @@ class DailyOperationController extends Controller
      */
     public function approve(Request $request, DailyOperation $daily_operation)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($daily_operation->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company daily operation.');
+        }
+
         $level = $request->input('target_status', 'department_head_approved');
         $remarks = $request->input('approval_remarks');
 
@@ -238,6 +284,11 @@ class DailyOperationController extends Controller
      */
     public function reject(Request $request, DailyOperation $daily_operation)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($daily_operation->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company daily operation.');
+        }
+
         $reason = $request->input('rejection_reason', 'Not specified');
 
         try {
@@ -254,6 +305,11 @@ class DailyOperationController extends Controller
      */
     public function getDepartmentStaff(Department $department)
     {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($department->company_id != $companyId) {
+            return response()->json([], 403);
+        }
+
         $staff = Staff::where('department_id', $department->id)
             ->where('status', 'active')
             ->select('id', 'first_name', 'last_name', 'employee_id', 'employee_type', 'hourly_rate', 'piece_rate', 'salary_amount')
