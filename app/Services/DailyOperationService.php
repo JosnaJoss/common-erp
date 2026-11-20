@@ -20,10 +20,14 @@ use Illuminate\Support\Facades\DB;
 class DailyOperationService
 {
     protected InventoryService $inventoryService;
+    protected AccountingService $accountingService;
 
-    public function __construct(?InventoryService $inventoryService = null)
-    {
+    public function __construct(
+        ?InventoryService $inventoryService = null,
+        ?AccountingService $accountingService = null
+    ) {
         $this->inventoryService = $inventoryService ?? new InventoryService();
+        $this->accountingService = $accountingService ?? new AccountingService();
     }
 
     /**
@@ -363,9 +367,211 @@ class DailyOperationService
                 }
             }
 
+            // 4. Double-Entry Manufacturing Cost Capitalization
+            $matCost = (float)$op->total_material_cost;
+            $laborCost = (float)$op->total_labor_cost;
+            $wasteCost = (float)$op->total_wastage_cost;
+
+            // Recalculate material cost if zero
+            if ($matCost <= 0) {
+                foreach ($op->materials as $mat) {
+                    $uCost = (float)$mat->unit_cost;
+                    if ($uCost <= 0) {
+                        $sb = StockBatch::where('godown_id', $mat->source_godown_id)
+                            ->where('item_id', $mat->item_id)
+                            ->where('batch_no', $mat->batch_no ?: 'DEFAULT')
+                            ->first();
+                        $uCost = $sb ? (float)$sb->cost_price : (float)($mat->item?->purchase_price ?: 0);
+                    }
+                    $matCost += ((float)$mat->consumed_quantity * $uCost);
+                }
+            }
+
+            $totalIncurred = $matCost + $laborCost;
+            $outputValue = $op->outputs->sum(fn($out) => (float)$out->produced_quantity * (float)$out->unit_cost);
+
+            // If input costs are 0 but outputs have values, align material cost to output value
+            if ($totalIncurred <= 0 && $outputValue > 0) {
+                $matCost = $outputValue;
+                $totalIncurred = $matCost;
+            }
+
+            $jvId = null;
+            if ($totalIncurred > 0) {
+                $finishedGoodsLedger = $this->accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Finished Goods Inventory', 'Current Assets', 'Assets'
+                );
+                $rawMaterialsLedger = $this->accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Raw Materials Inventory', 'Current Assets', 'Assets'
+                );
+                $laborPayableLedger = $this->accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Manufacturing Labor Payable', 'Current Liabilities', 'Liabilities'
+                );
+                $scrapLedger = $this->accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Production Scrap & Wastage', 'Direct Expenses & Purchases', 'Expenses'
+                );
+
+                $fgValue = max(0, round($totalIncurred - $wasteCost, 2));
+                $wasteCost = round($wasteCost, 2);
+                $matCost = round($matCost, 2);
+                $laborCost = round($laborCost, 2);
+
+                $lines = [];
+                if ($fgValue > 0) {
+                    $lines[] = [
+                        'ledger_id' => $finishedGoodsLedger->id,
+                        'debit' => $fgValue,
+                        'credit' => 0,
+                        'narration' => "Finished goods capitalized for Op #{$opNumber}",
+                    ];
+                }
+                if ($wasteCost > 0) {
+                    $lines[] = [
+                        'ledger_id' => $scrapLedger->id,
+                        'debit' => $wasteCost,
+                        'credit' => 0,
+                        'narration' => "Abnormal production scrap/wastage for Op #{$opNumber}",
+                    ];
+                }
+                if ($matCost > 0) {
+                    $lines[] = [
+                        'ledger_id' => $rawMaterialsLedger->id,
+                        'debit' => 0,
+                        'credit' => $matCost,
+                        'narration' => "Raw materials consumed in Op #{$opNumber}",
+                    ];
+                }
+                if ($laborCost > 0) {
+                    $lines[] = [
+                        'ledger_id' => $laborPayableLedger->id,
+                        'debit' => 0,
+                        'credit' => $laborCost,
+                        'narration' => "Direct labor wages recognized for Op #{$opNumber}",
+                    ];
+                }
+
+                $totalDeb = array_sum(array_column($lines, 'debit'));
+                $totalCred = array_sum(array_column($lines, 'credit'));
+
+                // Handle any cent/fraction rounding discrepancy between Debits and Credits
+                $roundingDiff = round($totalDeb - $totalCred, 2);
+                if (abs($roundingDiff) > 0 && abs($roundingDiff) <= 0.05) {
+                    if ($roundingDiff > 0) {
+                        $lines[count($lines) - 1]['credit'] += $roundingDiff;
+                    } else {
+                        $lines[0]['debit'] += abs($roundingDiff);
+                    }
+                }
+
+                if (count($lines) >= 2) {
+                    $jv = $this->accountingService->createJournalEntry(
+                        $companyId,
+                        $branchId,
+                        'Journal',
+                        $op->operation_date?->toDateString() ?: now()->toDateString(),
+                        "Manufacturing Capitalization for {$op->process_name} (Op #{$opNumber})",
+                        $lines,
+                        'DailyOperation',
+                        $op->id,
+                        $opNumber
+                    );
+                    $jvId = $jv->id;
+                }
+            }
+
             $op->update([
                 'stock_posted' => true,
                 'stock_posted_at' => now(),
+                'journal_entry_id' => $jvId,
+            ]);
+        });
+    }
+
+    /**
+     * Safely reverse a posted daily operation and its associated stock and accounting entries.
+     */
+    public function reverseOperation(DailyOperation $operation, int $userId, string $reason): void
+    {
+        DB::transaction(function () use ($operation, $userId, $reason) {
+            $op = DailyOperation::where('id', $operation->id)->lockForUpdate()->first();
+            if (!$op->stock_posted) {
+                throw new Exception("Operation has not been posted to stock, cannot reverse.");
+            }
+
+            $companyId = $op->company_id;
+            $branchId = $op->branch_id;
+            $opNumber = $op->operation_number;
+
+            // 1. Reverse finished goods (Stock Outward)
+            foreach ($op->outputs as $out) {
+                $this->inventoryService->recordOutward(
+                    $companyId,
+                    $branchId,
+                    $out->dest_godown_id,
+                    $out->item_id,
+                    (float)$out->produced_quantity,
+                    $out->batch_number ?: 'DEFAULT',
+                    'DailyOperationReversal',
+                    $op->id,
+                    $opNumber,
+                    "Reversal of Output for Op #{$opNumber}: {$reason}"
+                );
+            }
+
+            // 2. Reverse consumed raw materials (Stock Inward)
+            foreach ($op->materials as $mat) {
+                $this->inventoryService->recordInward(
+                    $companyId,
+                    $branchId,
+                    $mat->source_godown_id,
+                    $mat->item_id,
+                    (float)$mat->consumed_quantity,
+                    (float)$mat->unit_cost,
+                    $mat->batch_no ?: 'DEFAULT',
+                    null,
+                    'DailyOperationReversal',
+                    $op->id,
+                    $opNumber,
+                    "Restocked consumed material from Op #{$opNumber}: {$reason}"
+                );
+            }
+
+            // 3. Reverse journal entry if present
+            if ($op->journal_entry_id) {
+                $origJv = \App\Models\JournalEntry::find($op->journal_entry_id);
+                if ($origJv && !$origJv->is_reversed) {
+                    $reverseLines = [];
+                    foreach ($origJv->lines as $line) {
+                        $reverseLines[] = [
+                            'ledger_id' => $line->ledger_id,
+                            'debit' => (float)$line->credit_amount,
+                            'credit' => (float)$line->debit_amount,
+                            'narration' => "Reversal of Op #{$opNumber}: " . ($line->narration ?? $reason),
+                        ];
+                    }
+
+                    if (!empty($reverseLines)) {
+                        $this->accountingService->createJournalEntry(
+                            $companyId,
+                            $branchId,
+                            'Journal',
+                            now()->toDateString(),
+                            "Reversal of Manufacturing Capitalization for Op #{$opNumber}: {$reason}",
+                            $reverseLines,
+                            'DailyOperationReversal',
+                            $op->id,
+                            $opNumber
+                        );
+                    }
+                    $origJv->update(['is_reversed' => true]);
+                }
+            }
+
+            $op->update([
+                'stock_posted' => false,
+                'approval_status' => 'rejected',
+                'rejection_reason' => $reason,
+                'remarks' => ($op->remarks ? $op->remarks . ' | ' : '') . "Reversed on " . now()->toDateTimeString() . " by User #{$userId}: {$reason}",
             ]);
         });
     }

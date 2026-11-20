@@ -125,8 +125,192 @@ class ReportController extends Controller
             $liabilityRows[] = ['ledger' => $l, 'amount' => $val];
         }
 
+        // Compute Current-Period Profit / Loss from Revenue & Expense Ledgers
+        $revenueLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Revenue'))
+            ->get();
+        $totalRevenue = 0;
+        foreach ($revenueLedgers as $l) {
+            $l->recalculateBalance();
+            $totalRevenue += (float)$l->current_balance;
+        }
+
+        $expenseLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Expenses'))
+            ->get();
+        $totalExpense = 0;
+        foreach ($expenseLedgers as $l) {
+            $l->recalculateBalance();
+            $totalExpense += (float)$l->current_balance;
+        }
+
+        $currentPeriodProfit = round($totalRevenue - $totalExpense, 2);
+        $totalLiabilitiesAndEquity = round($totalLiabilities + $currentPeriodProfit, 2);
+
         return view('reports.financial.balance_sheet', compact(
-            'assetRows', 'totalAssets', 'liabilityRows', 'totalLiabilities'
+            'assetRows', 'totalAssets', 'liabilityRows', 'totalLiabilities', 'currentPeriodProfit', 'totalLiabilitiesAndEquity'
+        ));
+    }
+
+    public function cashFlow(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $startDate = $request->get('start_date', Carbon::now()->startOfYear()->toDateString());
+        $endDate = $request->get('end_date', Carbon::now()->toDateString());
+
+        // 1. Operating Profit from P&L
+        $revenueLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Revenue'))
+            ->get();
+        $totalRevenue = $revenueLedgers->sum(function ($l) {
+            $l->recalculateBalance();
+            return (float)$l->current_balance;
+        });
+
+        $expenseLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Expenses'))
+            ->get();
+        $totalExpense = $expenseLedgers->sum(function ($l) {
+            $l->recalculateBalance();
+            return (float)$l->current_balance;
+        });
+
+        $netProfit = $totalRevenue - $totalExpense;
+
+        // Working Capital Accounts
+        $debtorsLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SD-01')->orWhere('name', 'like', '%Debtor%'))
+            ->get();
+        $debtorsBalance = $debtorsLedgers->sum(fn($l) => (float)$l->current_balance);
+
+        $creditorsLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SC-01')->orWhere('name', 'like', '%Creditor%'))
+            ->get();
+        $creditorsBalance = $creditorsLedgers->sum(fn($l) => (float)$l->current_balance);
+
+        $inventoryLedgers = Ledger::where('company_id', $companyId)
+            ->where(function ($q) {
+                $q->where('name', 'like', '%Stock%')
+                  ->orWhere('name', 'like', '%Inventory%');
+            })
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Assets'))
+            ->get();
+        $inventoryBalance = $inventoryLedgers->sum(fn($l) => (float)$l->current_balance);
+
+        $taxesLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'DT-01')->orWhere('nature', 'Liabilities'))
+            ->where('name', 'like', '%Tax%')
+            ->get();
+        $taxesBalance = $taxesLedgers->sum(fn($l) => (float)$l->current_balance);
+
+        // Operating Cash Flow (Indirect Method)
+        $operatingCashFlow = $netProfit - $debtorsBalance - $inventoryBalance + $creditorsBalance + $taxesBalance;
+
+        // 2. Investing Cash Flow (Fixed Assets)
+        $fixedAssetLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'FA-01')->orWhere('name', 'like', '%Fixed%'))
+            ->get();
+        $fixedAssetNetChange = $fixedAssetLedgers->sum(fn($l) => (float)$l->current_balance);
+        $investingCashFlow = -$fixedAssetNetChange;
+
+        // 3. Financing Cash Flow (Capital & Borrowings)
+        $capitalLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Equity'))
+            ->where('name', 'not like', '%Profit%')
+            ->get();
+        $capitalNetChange = $capitalLedgers->sum(fn($l) => (float)$l->current_balance);
+        $financingCashFlow = $capitalNetChange;
+
+        // Net Cash Change
+        $netCashChange = $operatingCashFlow + $investingCashFlow + $financingCashFlow;
+
+        // Cash & Bank Closing Balances
+        $cashBankLedgers = Ledger::where('company_id', $companyId)
+            ->where(function ($q) {
+                $q->where('is_bank_or_cash', true)
+                  ->orWhereHas('accountGroup', fn($g) => $g->where('code', 'BK-01'));
+            })
+            ->get();
+
+        $closingCashBalance = 0;
+        $cashBankRows = [];
+        foreach ($cashBankLedgers as $cb) {
+            $cb->recalculateBalance();
+            $bal = (float)$cb->current_balance;
+            $closingCashBalance += $bal;
+            $cashBankRows[] = ['ledger' => $cb, 'balance' => $bal];
+        }
+
+        $openingCashBalance = $closingCashBalance - $netCashChange;
+
+        return view('reports.financial.cash_flow', compact(
+            'startDate', 'endDate', 'netProfit', 'debtorsBalance', 'creditorsBalance',
+            'inventoryBalance', 'taxesBalance', 'operatingCashFlow', 'investingCashFlow',
+            'financingCashFlow', 'netCashChange', 'openingCashBalance', 'closingCashBalance',
+            'cashBankRows'
+        ));
+    }
+
+    public function inventoryReconciliation(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $godownId = $request->get('godown_id');
+
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+
+        $query = StockBatch::where('company_id', $companyId)->with(['item.unit', 'godown']);
+        if ($godownId) {
+            $query->where('godown_id', $godownId);
+        }
+
+        $batches = $query->get();
+        $totalPhysicalValuation = $batches->sum(fn($b) => (float)$b->quantity * (float)$b->cost_price);
+        $totalPhysicalQty = $batches->sum(fn($b) => (float)$b->quantity);
+
+        // General Ledger Inventory Asset Accounts
+        $inventoryLedgers = Ledger::where('company_id', $companyId)
+            ->where(function ($q) {
+                $q->where('name', 'like', '%Stock%')
+                  ->orWhere('name', 'like', '%Inventory%');
+            })
+            ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Assets'))
+            ->get();
+
+        $totalLedgerValuation = 0;
+        $ledgerRows = [];
+        foreach ($inventoryLedgers as $l) {
+            $l->recalculateBalance();
+            $bal = (float)$l->current_balance;
+            $totalLedgerValuation += $bal;
+            $ledgerRows[] = ['ledger' => $l, 'balance' => $bal];
+        }
+
+        $variance = round($totalPhysicalValuation - $totalLedgerValuation, 2);
+        $isReconciled = abs($variance) <= 0.05;
+
+        // Group by Item for detailed comparison table
+        $itemsBreakdown = Item::where('company_id', $companyId)
+            ->where('status', 'active')
+            ->with(['batches' => function ($q) use ($godownId) {
+                if ($godownId) {
+                    $q->where('godown_id', $godownId);
+                }
+            }, 'unit'])
+            ->get()
+            ->map(function ($item) {
+                $qty = $item->batches->sum('quantity');
+                $val = $item->batches->sum(fn($b) => (float)$b->quantity * (float)$b->cost_price);
+                return [
+                    'item' => $item,
+                    'quantity' => $qty,
+                    'valuation' => $val,
+                ];
+            })
+            ->filter(fn($row) => $row['quantity'] > 0 || $row['valuation'] > 0);
+
+        return view('reports.inventory.reconciliation', compact(
+            'godowns', 'godownId', 'totalPhysicalValuation', 'totalPhysicalQty',
+            'totalLedgerValuation', 'variance', 'isReconciled', 'ledgerRows', 'itemsBreakdown'
         ));
     }
 

@@ -334,10 +334,12 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::get('/trial-balance', [ReportController::class, 'trialBalance'])->name('financial.trial_balance');
         Route::get('/profit-and-loss', [ReportController::class, 'profitAndLoss'])->name('financial.profit_and_loss');
         Route::get('/balance-sheet', [ReportController::class, 'balanceSheet'])->name('financial.balance_sheet');
+        Route::get('/cash-flow', [ReportController::class, 'cashFlow'])->name('financial.cash_flow');
         Route::get('/day-book', [ReportController::class, 'dayBook'])->name('financial.day_book');
 
         // Inventory
         Route::get('/stock-valuation', [ReportController::class, 'stockValuation'])->name('inventory.valuation');
+        Route::get('/inventory-reconciliation', [ReportController::class, 'inventoryReconciliation'])->name('inventory.reconciliation');
         Route::get('/reorder-alerts', [ReportController::class, 'reorderAlertReport'])->name('inventory.reorder_alerts');
 
         // Sales & Customers

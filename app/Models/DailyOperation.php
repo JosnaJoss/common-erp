@@ -30,6 +30,7 @@ class DailyOperation extends Model
         'rejection_reason',
         'stock_posted',
         'stock_posted_at',
+        'journal_entry_id',
         'total_labor_cost',
         'total_material_cost',
         'total_wastage_cost',
@@ -111,6 +112,11 @@ class DailyOperation extends Model
     {
         return $this->hasMany(StockMovement::class, 'reference_id')
             ->where('reference_type', 'DailyOperation');
+    }
+
+    public function journalEntry()
+    {
+        return $this->belongsTo(JournalEntry::class);
     }
 
     /**

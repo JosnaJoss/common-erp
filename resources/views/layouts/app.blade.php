@@ -344,10 +344,12 @@
                     <a href="{{ route('reports.financial.trial_balance') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.trial_balance') ? 'active' : '' }}">Trial Balance</a>
                     <a href="{{ route('reports.financial.profit_and_loss') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.profit_and_loss') ? 'active' : '' }}">Profit & Loss</a>
                     <a href="{{ route('reports.financial.balance_sheet') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.balance_sheet') ? 'active' : '' }}">Balance Sheet</a>
+                    <a href="{{ route('reports.financial.cash_flow') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.cash_flow') ? 'active' : '' }}">Cash Flow Statement</a>
                     <a href="{{ route('reports.financial.day_book') }}" class="nav-link-custom {{ request()->routeIs('reports.financial.day_book') ? 'active' : '' }}">Day Book</a>
                     <a href="{{ route('reports.sales.sales_register') }}" class="nav-link-custom {{ request()->routeIs('reports.sales.sales_register') ? 'active' : '' }}">Sales Register</a>
                     <a href="{{ route('reports.purchase.purchase_register') }}" class="nav-link-custom {{ request()->routeIs('reports.purchase.purchase_register') ? 'active' : '' }}">Purchase Register</a>
                     <a href="{{ route('reports.inventory.valuation') }}" class="nav-link-custom {{ request()->routeIs('reports.inventory.valuation') ? 'active' : '' }}">Stock Valuation</a>
+                    <a href="{{ route('reports.inventory.reconciliation') }}" class="nav-link-custom {{ request()->routeIs('reports.inventory.reconciliation') ? 'active' : '' }}">Stock Reconciliation</a>
                     <a href="{{ route('reports.sales.customer_outstanding') }}" class="nav-link-custom {{ request()->routeIs('reports.sales.customer_outstanding') ? 'active' : '' }}">Customer Outstanding</a>
                     <a href="{{ route('reports.purchase.supplier_outstanding') }}" class="nav-link-custom {{ request()->routeIs('reports.purchase.supplier_outstanding') ? 'active' : '' }}">Supplier Outstanding</a>
                     <a href="{{ route('reports.staff.payroll_report') }}" class="nav-link-custom {{ request()->routeIs('reports.staff.payroll_report') ? 'active' : '' }}">Payroll Register</a>

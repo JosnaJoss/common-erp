@@ -87,11 +87,20 @@
                                     <td colspan="2" class="text-center text-muted py-3">No liability or equity balances found.</td>
                                 </tr>
                             @endforelse
+
+                            @if(isset($currentPeriodProfit) && abs($currentPeriodProfit) > 0.001)
+                                <tr class="table-info">
+                                    <td class="fw-bold"><i class="bi bi-graph-up-arrow me-1"></i> Current Period Profit / (Loss)</td>
+                                    <td class="text-end fw-bold {{ $currentPeriodProfit >= 0 ? 'text-success' : 'text-danger' }}">
+                                        ₹ {{ number_format($currentPeriodProfit, 2) }}
+                                    </td>
+                                </tr>
+                            @endif
                         </tbody>
                         <tfoot class="bg-light fw-bold">
                             <tr class="table-danger">
                                 <td>Total Liabilities & Equity:</td>
-                                <td class="text-end text-danger fs-6">₹ {{ number_format($totalLiabilities, 2) }}</td>
+                                <td class="text-end text-danger fs-6">₹ {{ number_format($totalLiabilitiesAndEquity ?? $totalLiabilities, 2) }}</td>
                             </tr>
                         </tfoot>
                     </table>
@@ -99,6 +108,15 @@
             </div>
         </div>
     </div>
+
+    @if(isset($totalLiabilitiesAndEquity) && abs($totalAssets - $totalLiabilitiesAndEquity) <= 0.05)
+        <div class="alert alert-success d-flex align-items-center mb-4 py-2 px-3">
+            <i class="bi bi-check-circle-fill fs-5 me-2"></i>
+            <div>
+                <strong>Mathematically Balanced:</strong> Total Assets (₹ {{ number_format($totalAssets, 2) }}) exactly equals Total Liabilities & Equity (₹ {{ number_format($totalLiabilitiesAndEquity, 2) }}).
+            </div>
+        </div>
+    @endif
 
     <!-- Signatures -->
     <div class="row mt-5 pt-4 text-center">

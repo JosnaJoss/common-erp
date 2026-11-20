@@ -12,10 +12,12 @@ use App\Models\StockBatch;
 use App\Models\StockMovement;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
+use App\Services\AccountingService;
 use App\Services\CompanyContextService;
 use App\Services\InventoryService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 
 class InventoryController extends Controller
@@ -312,60 +314,123 @@ class InventoryController extends Controller
             'reason' => 'required|string',
         ]);
 
-        $batch = StockBatch::where('godown_id', $data['godown_id'])
-            ->where('item_id', $data['item_id'])
-            ->first();
+        return DB::transaction(function () use ($companyId, $data) {
+            $godown = Godown::where('id', $data['godown_id'])->where('company_id', $companyId)->firstOrFail();
+            $item = Item::where('id', $data['item_id'])->where('company_id', $companyId)->firstOrFail();
 
-        $currentStock = $batch ? (float)$batch->quantity : 0;
-        $actualStock = (float)$data['actual_stock'];
-        $diff = $actualStock - $currentStock;
+            $batch = StockBatch::where('godown_id', $data['godown_id'])
+                ->where('item_id', $data['item_id'])
+                ->lockForUpdate()
+                ->first();
 
-        if ($diff == 0) {
-            return back()->with('info', 'No difference between current stock and actual stock.');
-        }
+            $currentStock = $batch ? (float)$batch->quantity : 0;
+            $actualStock = (float)$data['actual_stock'];
+            $diff = $actualStock - $currentStock;
 
-        $type = $diff > 0 ? 'increase' : 'decrease';
-        $adjQty = abs($diff);
-        $adjNo = 'ADJ-' . date('Ymd') . '-' . rand(1000, 9999);
+            if ($diff == 0) {
+                return back()->with('info', 'No difference between current stock and actual stock.');
+            }
 
-        $adj = StockAdjustment::create([
-            'company_id' => $companyId,
-            'godown_id' => $data['godown_id'],
-            'adjustment_no' => $adjNo,
-            'adjustment_date' => now()->toDateString(),
-            'reason' => $data['reason'],
-            'status' => 'approved',
-            'approved_by' => auth()->id(),
-            'created_by' => auth()->id(),
-        ]);
+            $type = $diff > 0 ? 'increase' : 'decrease';
+            $adjQty = abs($diff);
+            $adjNo = 'ADJ-' . date('Ymd') . '-' . rand(1000, 9999);
 
-        StockAdjustmentItem::create([
-            'stock_adjustment_id' => $adj->id,
-            'item_id' => $data['item_id'],
-            'batch_id' => $batch?->id,
-            'current_stock' => $currentStock,
-            'actual_stock' => $actualStock,
-            'adjustment_qty' => $adjQty,
-            'type' => $type,
-        ]);
+            $adj = StockAdjustment::create([
+                'company_id' => $companyId,
+                'branch_id' => $godown->branch_id,
+                'godown_id' => $data['godown_id'],
+                'adjustment_no' => $adjNo,
+                'adjustment_date' => now()->toDateString(),
+                'reason' => $data['reason'],
+                'status' => 'approved',
+                'approved_by' => auth()->id(),
+                'created_by' => auth()->id(),
+            ]);
 
-        $inventoryService = new InventoryService();
-        if ($type === 'increase') {
-            $inventoryService->recordInward(
-                $companyId, null, $data['godown_id'], $data['item_id'],
-                $adjQty, $batch ? (float)$batch->cost_price : 0, $batch ? $batch->batch_no : 'DEFAULT',
-                null, 'StockAdjustment', $adj->id, $adjNo, $data['reason']
-            );
-        } else {
-            $inventoryService->recordOutward(
-                $companyId, null, $data['godown_id'], $data['item_id'],
-                $adjQty, $batch ? $batch->batch_no : 'DEFAULT',
-                'StockAdjustment', $adj->id, $adjNo, $data['reason']
-            );
-        }
+            StockAdjustmentItem::create([
+                'stock_adjustment_id' => $adj->id,
+                'item_id' => $data['item_id'],
+                'batch_id' => $batch?->id,
+                'current_stock' => $currentStock,
+                'actual_stock' => $actualStock,
+                'adjustment_qty' => $adjQty,
+                'type' => $type,
+            ]);
 
-        AuditLog::log('inventory', 'adjustment', "Applied adjustment {$adjNo} on Item #{$data['item_id']} ({$type} {$adjQty})");
-        return back()->with('success', "Stock adjusted successfully. Current balance updated to {$actualStock}.");
+            $unitCost = $batch && (float)$batch->cost_price > 0
+                ? (float)$batch->cost_price
+                : ((float)($item->cost_price ?? 0) ?: (float)($item->purchase_price ?? 0) ?: 10.0);
+
+            $inventoryService = new InventoryService();
+            if ($type === 'increase') {
+                $inventoryService->recordInward(
+                    $companyId, $godown->branch_id, $data['godown_id'], $data['item_id'],
+                    $adjQty, $unitCost, $batch ? $batch->batch_no : 'DEFAULT',
+                    null, 'StockAdjustment', $adj->id, $adjNo, $data['reason']
+                );
+            } else {
+                $inventoryService->recordOutward(
+                    $companyId, $godown->branch_id, $data['godown_id'], $data['item_id'],
+                    $adjQty, $batch ? $batch->batch_no : 'DEFAULT',
+                    'StockAdjustment', $adj->id, $adjNo, $data['reason']
+                );
+            }
+
+            // Post corresponding double-entry accounting journal
+            $adjValue = round($adjQty * $unitCost, 2);
+            if ($adjValue > 0) {
+                $accountingService = new AccountingService();
+                $stockAssetLedger = $accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Stock on Hand', 'Current Assets', 'Assets'
+                );
+
+                $reasonLower = strtolower($data['reason']);
+                $lines = [];
+
+                if (str_contains($reasonLower, 'damage') || str_contains($reasonLower, 'expire') || str_contains($reasonLower, 'spoil') || str_contains($reasonLower, 'waste')) {
+                    $lossLedger = $accountingService->getOrCreateStandardLedger(
+                        $companyId, 'Damaged & Expired Stock Expense', 'Direct Expenses & Purchases', 'Expenses'
+                    );
+                    $lines = [
+                        ['ledger_id' => $lossLedger->id, 'debit' => $adjValue, 'credit' => 0, 'narration' => "Damaged/expired stock write-off: {$data['reason']}"],
+                        ['ledger_id' => $stockAssetLedger->id, 'debit' => 0, 'credit' => $adjValue, 'narration' => "Inventory asset reduction due to damage/expiry"],
+                    ];
+                } elseif ($type === 'decrease') { // Shortage
+                    $lossLedger = $accountingService->getOrCreateStandardLedger(
+                        $companyId, 'Inventory Shortage & Loss', 'Direct Expenses & Purchases', 'Expenses'
+                    );
+                    $lines = [
+                        ['ledger_id' => $lossLedger->id, 'debit' => $adjValue, 'credit' => 0, 'narration' => "Physical count shortage: {$data['reason']}"],
+                        ['ledger_id' => $stockAssetLedger->id, 'debit' => 0, 'credit' => $adjValue, 'narration' => "Inventory asset reduction due to physical shortage"],
+                    ];
+                } else { // Surplus / gain
+                    $gainLedger = $accountingService->getOrCreateStandardLedger(
+                        $companyId, 'Inventory Surplus & Gain', 'Sales & Operating Revenue', 'Revenue'
+                    );
+                    $lines = [
+                        ['ledger_id' => $stockAssetLedger->id, 'debit' => $adjValue, 'credit' => 0, 'narration' => "Inventory asset addition due to physical surplus"],
+                        ['ledger_id' => $gainLedger->id, 'debit' => 0, 'credit' => $adjValue, 'narration' => "Physical count surplus gain: {$data['reason']}"],
+                    ];
+                }
+
+                $jv = $accountingService->createJournalEntry(
+                    $companyId,
+                    $godown->branch_id,
+                    'Journal',
+                    now()->toDateString(),
+                    "Stock Adjustment {$adjNo} on {$item->name} ({$type} {$adjQty})",
+                    $lines,
+                    'StockAdjustment',
+                    $adj->id,
+                    $adjNo
+                );
+
+                $adj->update(['journal_entry_id' => $jv->id]);
+            }
+
+            AuditLog::log('inventory', 'adjustment', "Applied adjustment {$adjNo} on Item #{$data['item_id']} ({$type} {$adjQty})");
+            return back()->with('success', "Stock adjusted successfully. Current balance updated to {$actualStock}.");
+        });
     }
 
     // Alerts
@@ -418,34 +483,85 @@ class InventoryController extends Controller
             'items.*.unit_cost' => 'nullable|numeric|min:0',
         ]);
 
-        $inventoryService = new InventoryService();
-        $count = 0;
+        return DB::transaction(function () use ($companyId, $data) {
+            $godown = Godown::where('id', $data['godown_id'])->where('company_id', $companyId)->firstOrFail();
+            $inventoryService = new InventoryService();
+            $count = 0;
+            $totalOpeningValue = 0;
+            $opRefNo = 'OPENING-' . date('Ymd') . '-' . $godown->id . '-' . rand(100, 999);
 
-        foreach ($data['items'] as $row) {
-            $qty = (float)($row['quantity'] ?? 0);
-            if ($qty > 0) {
-                $cost = (float)($row['unit_cost'] ?? 0);
-                $inventoryService->recordInward(
-                    $companyId,
-                    null,
-                    $data['godown_id'],
-                    $row['item_id'],
-                    $qty,
-                    $cost,
-                    'DEFAULT',
-                    null,
-                    'Opening Stock',
-                    null,
-                    'OPENING-' . date('Ymd'),
-                    'Bulk Opening Stock Inward'
-                );
-                $count++;
+            foreach ($data['items'] as $row) {
+                $qty = (float)($row['quantity'] ?? 0);
+                if ($qty > 0) {
+                    $item = Item::where('id', $row['item_id'])->where('company_id', $companyId)->firstOrFail();
+                    $cost = (float)($row['unit_cost'] ?? 0);
+                    if ($cost <= 0) {
+                        $cost = (float)($item->cost_price ?? 0) ?: (float)($item->purchase_price ?? 0) ?: 10.0;
+                    }
+
+                    $inventoryService->recordInward(
+                        $companyId,
+                        $godown->branch_id,
+                        $data['godown_id'],
+                        $row['item_id'],
+                        $qty,
+                        $cost,
+                        'DEFAULT',
+                        null,
+                        'OpeningStock',
+                        $godown->id,
+                        $opRefNo,
+                        'Bulk Opening Stock Inward'
+                    );
+
+                    $totalOpeningValue += ($qty * $cost);
+                    $count++;
+                }
             }
-        }
 
-        AuditLog::log('inventory', 'opening_stock', "Recorded opening stock for {$count} items in Godown #{$data['godown_id']}");
-        return redirect()->route('inventory.overview', ['godown_id' => $data['godown_id']])
-            ->with('success', "Opening stock successfully recorded for {$count} items.");
+            // Post opening balance accounting entry
+            $totalOpeningValue = round($totalOpeningValue, 2);
+            if ($totalOpeningValue > 0) {
+                $accountingService = new AccountingService();
+                $stockAssetLedger = $accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Stock on Hand', 'Current Assets', 'Assets'
+                );
+                $openingEquityLedger = $accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Opening Balance Equity', 'Capital & Reserves', 'Equity'
+                );
+
+                $lines = [
+                    [
+                        'ledger_id' => $stockAssetLedger->id,
+                        'debit' => $totalOpeningValue,
+                        'credit' => 0,
+                        'narration' => "Opening stock valuation for Godown {$godown->name}",
+                    ],
+                    [
+                        'ledger_id' => $openingEquityLedger->id,
+                        'debit' => 0,
+                        'credit' => $totalOpeningValue,
+                        'narration' => "Opening balance equity for Godown {$godown->name}",
+                    ],
+                ];
+
+                $accountingService->createJournalEntry(
+                    $companyId,
+                    $godown->branch_id,
+                    'Journal',
+                    now()->toDateString(),
+                    "Opening Stock Initial Valuation for Godown: {$godown->name}",
+                    $lines,
+                    'OpeningStock',
+                    $godown->id,
+                    $opRefNo
+                );
+            }
+
+            AuditLog::log('inventory', 'opening_stock', "Recorded opening stock for {$count} items in Godown #{$data['godown_id']}");
+            return redirect()->route('inventory.overview', ['godown_id' => $data['godown_id']])
+                ->with('success', "Opening stock successfully recorded for {$count} items with financial ledger balance.");
+        });
     }
 }
 

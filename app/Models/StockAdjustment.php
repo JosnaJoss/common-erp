@@ -17,6 +17,7 @@ class StockAdjustment extends Model
         'adjustment_date',
         'reason',
         'status',
+        'journal_entry_id',
         'approved_by',
         'approval_remarks',
         'created_by',
@@ -39,6 +40,11 @@ class StockAdjustment extends Model
     public function approver()
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function journalEntry()
+    {
+        return $this->belongsTo(JournalEntry::class);
     }
 }
 
