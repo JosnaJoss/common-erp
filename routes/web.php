@@ -321,6 +321,7 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::post('/{daily_operation}/submit', [DailyOperationController::class, 'submit'])->name('submit');
         Route::post('/{daily_operation}/approve', [DailyOperationController::class, 'approve'])->name('approve');
         Route::post('/{daily_operation}/reject', [DailyOperationController::class, 'reject'])->name('reject');
+        Route::post('/{daily_operation}/reverse', [DailyOperationController::class, 'reverse'])->name('reverse');
         Route::get('/helpers/department-staff/{department}', [DailyOperationController::class, 'getDepartmentStaff'])->name('helpers.staff');
         Route::get('/helpers/item-stock', [DailyOperationController::class, 'getItemStock'])->name('helpers.stock');
     });

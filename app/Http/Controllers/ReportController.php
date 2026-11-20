@@ -158,71 +158,81 @@ class ReportController extends Controller
         $startDate = $request->get('start_date', Carbon::now()->startOfYear()->toDateString());
         $endDate = $request->get('end_date', Carbon::now()->toDateString());
 
-        // 1. Operating Profit from P&L
+        // 1. Operating Profit from P&L during the selected period
         $revenueLedgers = Ledger::where('company_id', $companyId)
             ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Revenue'))
             ->get();
-        $totalRevenue = $revenueLedgers->sum(function ($l) {
-            $l->recalculateBalance();
-            return (float)$l->current_balance;
-        });
+        $totalRevenue = $revenueLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
 
         $expenseLedgers = Ledger::where('company_id', $companyId)
             ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Expenses'))
             ->get();
-        $totalExpense = $expenseLedgers->sum(function ($l) {
-            $l->recalculateBalance();
-            return (float)$l->current_balance;
-        });
+        $totalExpense = $expenseLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
 
-        $netProfit = $totalRevenue - $totalExpense;
+        $netProfit = round($totalRevenue - $totalExpense, 2);
 
-        // Working Capital Accounts
+        // 2. Working Capital Period Changes (Period Movement = Closing - Opening)
         $debtorsLedgers = Ledger::where('company_id', $companyId)
-            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SD-01')->orWhere('name', 'like', '%Debtor%'))
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SD-01')->orWhere('name', 'like', '%Debtor%')->orWhere('name', 'like', '%Receivable%'))
             ->get();
-        $debtorsBalance = $debtorsLedgers->sum(fn($l) => (float)$l->current_balance);
+        $debtorsDelta = $debtorsLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
 
         $creditorsLedgers = Ledger::where('company_id', $companyId)
-            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SC-01')->orWhere('name', 'like', '%Creditor%'))
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SC-01')->orWhere('name', 'like', '%Creditor%')->orWhere('name', 'like', '%Payable%'))
             ->get();
-        $creditorsBalance = $creditorsLedgers->sum(fn($l) => (float)$l->current_balance);
+        $creditorsDelta = $creditorsLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
 
         $inventoryLedgers = Ledger::where('company_id', $companyId)
             ->where(function ($q) {
-                $q->where('name', 'like', '%Stock%')
+                $q->where('is_inventory', true)
+                  ->orWhere('name', 'like', '%Stock%')
                   ->orWhere('name', 'like', '%Inventory%');
             })
             ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Assets'))
             ->get();
-        $inventoryBalance = $inventoryLedgers->sum(fn($l) => (float)$l->current_balance);
+        $inventoryDelta = $inventoryLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
 
         $taxesLedgers = Ledger::where('company_id', $companyId)
             ->whereHas('accountGroup', fn($q) => $q->where('code', 'DT-01')->orWhere('nature', 'Liabilities'))
-            ->where('name', 'like', '%Tax%')
+            ->where(function ($q) {
+                $q->where('name', 'like', '%Tax%')
+                  ->orWhere('name', 'like', '%Payable%');
+            })
+            ->where('name', 'not like', '%Creditor%')
             ->get();
+        $taxesDelta = $taxesLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
+
+        // Operating Cash Flow (Indirect Method): Net Profit - ΔDebtors - ΔInventory + ΔCreditors + ΔTaxes
+        $operatingCashFlow = round($netProfit - $debtorsDelta - $inventoryDelta + $creditorsDelta + $taxesDelta, 2);
+
+        // Cumulative balances for display context
+        $debtorsBalance = $debtorsLedgers->sum(fn($l) => (float)$l->current_balance);
+        $creditorsBalance = $creditorsLedgers->sum(fn($l) => (float)$l->current_balance);
+        $inventoryBalance = $inventoryLedgers->sum(fn($l) => (float)$l->current_balance);
         $taxesBalance = $taxesLedgers->sum(fn($l) => (float)$l->current_balance);
 
-        // Operating Cash Flow (Indirect Method)
-        $operatingCashFlow = $netProfit - $debtorsBalance - $inventoryBalance + $creditorsBalance + $taxesBalance;
-
-        // 2. Investing Cash Flow (Fixed Assets)
+        // 3. Investing Cash Flow (Fixed Assets movements during period)
         $fixedAssetLedgers = Ledger::where('company_id', $companyId)
             ->whereHas('accountGroup', fn($q) => $q->where('code', 'FA-01')->orWhere('name', 'like', '%Fixed%'))
             ->get();
-        $fixedAssetNetChange = $fixedAssetLedgers->sum(fn($l) => (float)$l->current_balance);
-        $investingCashFlow = -$fixedAssetNetChange;
+        $fixedAssetNetChange = $fixedAssetLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
+        $investingCashFlow = round(-$fixedAssetNetChange, 2);
 
-        // 3. Financing Cash Flow (Capital & Borrowings)
+        // 4. Financing Cash Flow (Capital & Borrowings movements during period)
         $capitalLedgers = Ledger::where('company_id', $companyId)
             ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Equity'))
             ->where('name', 'not like', '%Profit%')
             ->get();
-        $capitalNetChange = $capitalLedgers->sum(fn($l) => (float)$l->current_balance);
-        $financingCashFlow = $capitalNetChange;
+        $capitalNetChange = $capitalLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
+
+        $loansLedgers = Ledger::where('company_id', $companyId)
+            ->whereHas('accountGroup', fn($q) => $q->where('code', 'SL-01')->orWhere('code', 'UL-01')->orWhere('name', 'like', '%Loan%')->orWhere('name', 'like', '%Borrowing%'))
+            ->get();
+        $loansNetChange = $loansLedgers->sum(fn($l) => $l->getMovementBetween($startDate, $endDate));
+        $financingCashFlow = round($capitalNetChange + $loansNetChange, 2);
 
         // Net Cash Change
-        $netCashChange = $operatingCashFlow + $investingCashFlow + $financingCashFlow;
+        $netCashChange = round($operatingCashFlow + $investingCashFlow + $financingCashFlow, 2);
 
         // Cash & Bank Closing Balances
         $cashBankLedgers = Ledger::where('company_id', $companyId)
@@ -232,20 +242,21 @@ class ReportController extends Controller
             })
             ->get();
 
-        $closingCashBalance = 0;
+        $dayBeforeStart = Carbon::parse($startDate)->subDay()->toDateString();
+        $openingCashBalance = round($cashBankLedgers->sum(fn($cb) => $cb->getBalanceAsOf($dayBeforeStart)), 2);
+        $closingCashBalance = round($cashBankLedgers->sum(fn($cb) => $cb->getBalanceAsOf($endDate)), 2);
+
         $cashBankRows = [];
         foreach ($cashBankLedgers as $cb) {
             $cb->recalculateBalance();
-            $bal = (float)$cb->current_balance;
-            $closingCashBalance += $bal;
+            $bal = (float)$cb->getBalanceAsOf($endDate);
             $cashBankRows[] = ['ledger' => $cb, 'balance' => $bal];
         }
 
-        $openingCashBalance = $closingCashBalance - $netCashChange;
-
         return view('reports.financial.cash_flow', compact(
             'startDate', 'endDate', 'netProfit', 'debtorsBalance', 'creditorsBalance',
-            'inventoryBalance', 'taxesBalance', 'operatingCashFlow', 'investingCashFlow',
+            'inventoryBalance', 'taxesBalance', 'debtorsDelta', 'creditorsDelta',
+            'inventoryDelta', 'taxesDelta', 'operatingCashFlow', 'investingCashFlow',
             'financingCashFlow', 'netCashChange', 'openingCashBalance', 'closingCashBalance',
             'cashBankRows'
         ));
@@ -267,11 +278,14 @@ class ReportController extends Controller
         $totalPhysicalValuation = $batches->sum(fn($b) => (float)$b->quantity * (float)$b->cost_price);
         $totalPhysicalQty = $batches->sum(fn($b) => (float)$b->quantity);
 
-        // General Ledger Inventory Asset Accounts
+        // General Ledger Inventory Asset Accounts - Explicit Classification
         $inventoryLedgers = Ledger::where('company_id', $companyId)
             ->where(function ($q) {
-                $q->where('name', 'like', '%Stock%')
-                  ->orWhere('name', 'like', '%Inventory%');
+                $q->where('is_inventory', true)
+                  ->orWhere(function ($fallback) {
+                      $fallback->where('name', 'like', '%Stock%')
+                               ->orWhere('name', 'like', '%Inventory%');
+                  });
             })
             ->whereHas('accountGroup', fn($q) => $q->where('nature', 'Assets'))
             ->get();

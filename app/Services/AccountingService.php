@@ -214,15 +214,34 @@ class AccountingService
             ['nature' => $nature]
         );
 
-        return Ledger::firstOrCreate(
+        $isInventory = in_array($ledgerName, ['Stock on Hand', 'Raw Materials Inventory', 'Finished Goods Inventory', 'Work-in-Progress Inventory']);
+        $inventoryType = match ($ledgerName) {
+            'Raw Materials Inventory' => 'raw_materials',
+            'Finished Goods Inventory' => 'finished_goods',
+            'Work-in-Progress Inventory' => 'wip',
+            default => $isInventory ? 'general' : null,
+        };
+
+        $ledger = Ledger::firstOrCreate(
             ['company_id' => $companyId, 'name' => $ledgerName],
             [
                 'account_group_id' => $group->id,
                 'balance_type' => in_array($nature, ['Assets', 'Expenses']) ? 'debit' : 'credit',
                 'current_balance' => 0,
                 'is_bank_or_cash' => in_array($ledgerName, ['Cash in Hand', 'Petty Cash', 'Main Bank Account']),
+                'is_inventory' => $isInventory,
+                'inventory_type' => $inventoryType,
             ]
         );
+
+        if ($isInventory && !$ledger->is_inventory) {
+            $ledger->update([
+                'is_inventory' => true,
+                'inventory_type' => $inventoryType,
+            ]);
+        }
+
+        return $ledger;
     }
 }
 

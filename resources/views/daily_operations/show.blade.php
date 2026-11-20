@@ -74,8 +74,25 @@
             <i class="bi bi-x-circle me-1"></i> Reject
         </button>
         @endif
+
+        @if($daily_operation->stock_posted && !$daily_operation->reversed_at)
+        <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#reverseModal">
+            <i class="bi bi-arrow-counterclockwise me-1"></i> Reverse Operation
+        </button>
+        @endif
     </div>
 </div>
+
+@if($daily_operation->reversed_at)
+<div class="alert alert-danger d-flex align-items-center mb-3">
+    <i class="bi bi-exclamation-octagon-fill fs-4 me-3"></i>
+    <div>
+        <strong>Operation Reversed:</strong> This daily operation was reversed on {{ $daily_operation->reversed_at->format('d M Y, h:i A') }}
+        @if($daily_operation->reverser) by <strong>{{ $daily_operation->reverser->name }}</strong> @endif.
+        <div class="small mt-1 text-dark"><strong>Reversal Reason:</strong> {{ $daily_operation->rejection_reason }}</div>
+    </div>
+</div>
+@endif
 
 @if(session('success'))
 <div class="alert alert-success alert-dismissible fade show" role="alert">
@@ -460,6 +477,43 @@
 </div>
 @endif
 
+@if($daily_operation->overheadAllocations->isNotEmpty())
+<div class="card card-custom mb-3">
+    <div class="card-header bg-white py-2 fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-gear-wide-connected text-info me-2"></i>Allocated Manufacturing Overheads</span>
+        <span class="badge bg-info-subtle text-info border">Total: ₹{{ number_format((float)$daily_operation->total_overhead_cost, 2) }}</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr>
+                        <th class="ps-3">Category</th>
+                        <th>Allocation Method</th>
+                        <th class="text-center">Basis Value</th>
+                        <th class="text-center">Rate / Unit</th>
+                        <th class="text-end">Allocated Amount (₹)</th>
+                        <th class="pe-3">Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($daily_operation->overheadAllocations as $ovh)
+                    <tr>
+                        <td class="ps-3 fw-semibold text-capitalize">{{ str_replace('_', ' ', $ovh->overhead_category) }}</td>
+                        <td><span class="badge bg-light text-dark border">{{ str_replace('_', ' ', $ovh->allocation_method) }}</span></td>
+                        <td class="text-center">{{ number_format($ovh->allocation_basis_value, 2) }}</td>
+                        <td class="text-center">₹{{ number_format($ovh->rate_per_unit, 2) }}</td>
+                        <td class="text-end fw-bold text-info">₹{{ number_format($ovh->allocated_amount, 2) }}</td>
+                        <td class="pe-3 text-muted">{{ $ovh->notes ?: '—' }}</td>
+                    </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+@endif
+
 <!-- Reject Modal -->
 <div class="modal fade" id="rejectModal" tabindex="-1">
     <div class="modal-dialog">
@@ -477,6 +531,33 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="submit" class="btn btn-danger">Confirm Rejection</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Reverse Modal -->
+<div class="modal fade" id="reverseModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form method="POST" action="{{ route('daily_operations.reverse', $daily_operation->id) }}">
+            @csrf
+            <div class="modal-content">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-2"></i>Reverse Daily Operation</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning small mb-3">
+                        <i class="bi bi-exclamation-circle-fill me-1"></i>
+                        <strong>Warning:</strong> Reversing this operation will restore consumed raw materials back to inventory, deduct produced finished goods, and reverse the manufacturing accounting journal voucher.
+                    </div>
+                    <label class="form-label small fw-semibold">Mandatory Reason for Reversal <span class="text-danger">*</span></label>
+                    <textarea name="reversal_reason" class="form-control" rows="3" placeholder="State reason for reversal (e.g. quality batch defect, order cancellation, clerical error)..." required minlength="5"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">Confirm & Execute Reversal</button>
                 </div>
             </div>
         </form>

@@ -342,11 +342,54 @@ class PayrollController extends Controller
         }
 
         // 3. Balanced Double-Entry Voucher
-        $salaryExpense = max(0, (float)$payroll->gross_salary - (float)$payroll->lop_deduction);
+        $totalSalaryExpenditure = max(0, (float)$payroll->gross_salary - (float)$payroll->lop_deduction);
 
-        $lines = [
-            ['ledger_id' => $salaryExpLedger->id, 'debit' => $salaryExpense, 'credit' => 0, 'narration' => "Salary Expense for {$payroll->staff->full_name} net of LOP"],
-        ];
+        // Check accrued factory/manufacturing labor for this employee in this salary month
+        $mfgAccruedWage = (float)\App\Models\DailyOperationEmployee::where('staff_id', $payroll->staff_id)
+            ->whereHas('dailyOperation', function ($q) use ($companyId, $payroll) {
+                $q->where('company_id', $companyId)
+                    ->where('stock_posted', true)
+                    ->where('operation_date', 'like', "{$payroll->salary_month}%");
+            })
+            ->sum('wage_earned');
+
+        // Check if employee is classified as factory/production worker
+        $isFactoryWorker = in_array($payroll->staff->employee_type ?? '', ['piece_rate', 'hourly', 'daily_wage'])
+            || str_contains(strtolower($payroll->staff->department?->name ?? ''), 'production')
+            || str_contains(strtolower($payroll->staff->department?->name ?? ''), 'manufacturing')
+            || str_contains(strtolower($payroll->staff->department?->name ?? ''), 'factory');
+
+        $mfgLaborSettlement = 0;
+        if ($mfgAccruedWage > 0) {
+            $mfgLaborSettlement = min($totalSalaryExpenditure, $mfgAccruedWage);
+        } elseif ($isFactoryWorker && ($payroll->staff->employee_type ?? '') === 'piece_rate') {
+            $mfgLaborSettlement = $totalSalaryExpenditure;
+        }
+
+        $mfgLaborSettlement = round($mfgLaborSettlement, 2);
+        $adminSalaryExpense = round($totalSalaryExpenditure - $mfgLaborSettlement, 2);
+
+        $lines = [];
+        if ($mfgLaborSettlement > 0) {
+            $mfgLaborPayableLedger = $accountingService->getOrCreateStandardLedger(
+                $companyId, 'Manufacturing Labor Payable', 'Current Liabilities', 'Liabilities'
+            );
+            $lines[] = [
+                'ledger_id' => $mfgLaborPayableLedger->id,
+                'debit' => $mfgLaborSettlement,
+                'credit' => 0,
+                'narration' => "Settlement of accrued direct manufacturing labor for {$payroll->staff->full_name} ({$payroll->salary_month})",
+            ];
+        }
+
+        if ($adminSalaryExpense > 0) {
+            $lines[] = [
+                'ledger_id' => $salaryExpLedger->id,
+                'debit' => $adminSalaryExpense,
+                'credit' => 0,
+                'narration' => "Salary Expense for {$payroll->staff->full_name} net of LOP",
+            ];
+        }
 
         $statutoryDeductions = (float)$payroll->pf_deduction + (float)$payroll->esi_deduction;
         if ($statutoryDeductions > 0) {
@@ -383,6 +426,8 @@ class PayrollController extends Controller
             'payment_mode' => $data['payment_mode'],
             'transaction_reference' => $data['transaction_reference'] ?? null,
             'journal_entry_id' => $jv->id,
+            'manufacturing_labor_settled' => $mfgLaborSettlement,
+            'administrative_salary_expense' => $adminSalaryExpense,
         ]);
     }
 }

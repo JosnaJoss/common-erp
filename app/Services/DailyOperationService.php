@@ -13,6 +13,8 @@ use App\Models\Staff;
 use App\Models\StockBatch;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
+use App\Models\FinancialYear;
+use App\Models\ManufacturingOverheadAllocation;
 use Carbon\Carbon;
 use Exception;
 use Illuminate\Support\Facades\DB;
@@ -40,10 +42,18 @@ class DailyOperationService
         array $outputs = [],
         array $wastages = [],
         array $distributions = [],
+        array|int $overheads = [],
         int $userId = 1
     ): DailyOperation {
+        if (is_int($overheads)) {
+            $userId = $overheads;
+            $overheads = $data['overheads'] ?? [];
+        } elseif (empty($overheads) && isset($data['overheads'])) {
+            $overheads = $data['overheads'];
+        }
+
         return DB::transaction(function () use (
-            $data, $employees, $materials, $outputs, $wastages, $distributions, $userId
+            $data, $employees, $materials, $outputs, $wastages, $distributions, $overheads, $userId
         ) {
             $companyId = $data['company_id'];
             $date = $data['operation_date'] ?? now()->toDateString();
@@ -83,6 +93,20 @@ class DailyOperationService
                 $totalWastageCost += (float)($w['estimated_cost'] ?? 0);
             }
 
+            $totalOverheadCost = 0;
+            foreach ($overheads as $ovh) {
+                $amount = (float)($ovh['allocated_amount'] ?? 0);
+                $basis = (float)($ovh['allocation_basis_value'] ?? 0);
+                $rate = (float)($ovh['rate_per_unit'] ?? 0);
+                if ($amount <= 0 && $rate > 0) {
+                    $amount = round($basis * $rate, 2);
+                }
+                $totalOverheadCost += $amount;
+            }
+            if ($totalOverheadCost <= 0 && isset($data['total_overhead_cost'])) {
+                $totalOverheadCost = (float)$data['total_overhead_cost'];
+            }
+
             $operation = DailyOperation::create([
                 'company_id' => $companyId,
                 'branch_id' => $data['branch_id'] ?? null,
@@ -105,6 +129,7 @@ class DailyOperationService
                 'total_labor_cost' => $totalLaborCost,
                 'total_material_cost' => $totalMaterialCost,
                 'total_wastage_cost' => $totalWastageCost,
+                'total_overhead_cost' => $totalOverheadCost,
                 'remarks' => $data['remarks'] ?? null,
                 'created_by' => $userId,
             ]);
@@ -200,6 +225,31 @@ class DailyOperationService
                     'status' => $dst['status'] ?? 'received',
                     'notes' => $dst['notes'] ?? null,
                 ]);
+            }
+
+            // Save Overhead Allocations
+            foreach ($overheads as $ovh) {
+                $amount = (float)($ovh['allocated_amount'] ?? 0);
+                $basis = (float)($ovh['allocation_basis_value'] ?? 0);
+                $rate = (float)($ovh['rate_per_unit'] ?? 0);
+                if ($amount <= 0 && $rate > 0) {
+                    $amount = round($basis * $rate, 2);
+                }
+                if ($amount > 0) {
+                    ManufacturingOverheadAllocation::create([
+                        'company_id' => $companyId,
+                        'branch_id' => $data['branch_id'] ?? null,
+                        'daily_operation_id' => $operation->id,
+                        'expense_ledger_id' => $ovh['expense_ledger_id'] ?? null,
+                        'overhead_category' => $ovh['overhead_category'] ?? 'general',
+                        'allocation_method' => $ovh['allocation_method'] ?? 'direct',
+                        'allocation_basis_value' => $basis,
+                        'rate_per_unit' => $rate,
+                        'allocated_amount' => $amount,
+                        'notes' => $ovh['notes'] ?? null,
+                        'created_by' => $userId,
+                    ]);
+                }
             }
 
             // If created directly with approved status, post inventory immediately
@@ -371,6 +421,7 @@ class DailyOperationService
             $matCost = (float)$op->total_material_cost;
             $laborCost = (float)$op->total_labor_cost;
             $wasteCost = (float)$op->total_wastage_cost;
+            $overheadCost = (float)($op->total_overhead_cost > 0 ? $op->total_overhead_cost : $op->overheadAllocations()->sum('allocated_amount'));
 
             // Recalculate material cost if zero
             if ($matCost <= 0) {
@@ -387,7 +438,7 @@ class DailyOperationService
                 }
             }
 
-            $totalIncurred = $matCost + $laborCost;
+            $totalIncurred = $matCost + $laborCost + $overheadCost;
             $outputValue = $op->outputs->sum(fn($out) => (float)$out->produced_quantity * (float)$out->unit_cost);
 
             // If input costs are 0 but outputs have values, align material cost to output value
@@ -410,11 +461,15 @@ class DailyOperationService
                 $scrapLedger = $this->accountingService->getOrCreateStandardLedger(
                     $companyId, 'Production Scrap & Wastage', 'Direct Expenses & Purchases', 'Expenses'
                 );
+                $overheadAbsorbedLedger = $this->accountingService->getOrCreateStandardLedger(
+                    $companyId, 'Manufacturing Overhead Absorbed', 'Direct Expenses & Purchases', 'Expenses'
+                );
 
                 $fgValue = max(0, round($totalIncurred - $wasteCost, 2));
                 $wasteCost = round($wasteCost, 2);
                 $matCost = round($matCost, 2);
                 $laborCost = round($laborCost, 2);
+                $overheadCost = round($overheadCost, 2);
 
                 $lines = [];
                 if ($fgValue > 0) {
@@ -447,6 +502,14 @@ class DailyOperationService
                         'debit' => 0,
                         'credit' => $laborCost,
                         'narration' => "Direct labor wages recognized for Op #{$opNumber}",
+                    ];
+                }
+                if ($overheadCost > 0) {
+                    $lines[] = [
+                        'ledger_id' => $overheadAbsorbedLedger->id,
+                        'debit' => 0,
+                        'credit' => $overheadCost,
+                        'narration' => "Applied manufacturing overhead for Op #{$opNumber}",
                     ];
                 }
 
@@ -497,12 +560,39 @@ class DailyOperationService
             if (!$op->stock_posted) {
                 throw new Exception("Operation has not been posted to stock, cannot reverse.");
             }
+            if ($op->reversed_at) {
+                throw new Exception("Operation has already been reversed on {$op->reversed_at->toDateTimeString()}.");
+            }
 
             $companyId = $op->company_id;
             $branchId = $op->branch_id;
             $opNumber = $op->operation_number;
 
-            // 1. Reverse finished goods (Stock Outward)
+            // 1. Validate accounting period lock
+            $isPeriodLocked = FinancialYear::where('company_id', $companyId)
+                ->where('start_date', '<=', $op->operation_date)
+                ->where('end_date', '>=', $op->operation_date)
+                ->where('is_closed', true)
+                ->exists();
+            if ($isPeriodLocked) {
+                throw new Exception("Cannot reverse operation: The accounting period for {$op->operation_date->toDateString()} is closed/locked.");
+            }
+
+            // 2. Validate downstream stock availability
+            foreach ($op->outputs as $out) {
+                $batch = StockBatch::where('godown_id', $out->dest_godown_id)
+                    ->where('item_id', $out->item_id)
+                    ->where('batch_no', $out->batch_number ?: 'DEFAULT')
+                    ->first();
+                $availQty = $batch ? (float)$batch->quantity : 0;
+                $reqQty = (float)$out->produced_quantity;
+                if ($availQty < $reqQty) {
+                    $itemName = $out->item?->name ?? "Item #{$out->item_id}";
+                    throw new Exception("Cannot reverse operation #{$opNumber}: Produced stock for '{$itemName}' (Batch: " . ($out->batch_number ?: 'DEFAULT') . ") has already been consumed, sold, or transferred. Available in warehouse: {$availQty}, required for reversal: {$reqQty}.");
+                }
+            }
+
+            // 3. Reverse finished goods (Stock Outward)
             foreach ($op->outputs as $out) {
                 $this->inventoryService->recordOutward(
                     $companyId,
@@ -571,6 +661,8 @@ class DailyOperationService
                 'stock_posted' => false,
                 'approval_status' => 'rejected',
                 'rejection_reason' => $reason,
+                'reversed_at' => now(),
+                'reversed_by' => $userId,
                 'remarks' => ($op->remarks ? $op->remarks . ' | ' : '') . "Reversed on " . now()->toDateTimeString() . " by User #{$userId}: {$reason}",
             ]);
         });

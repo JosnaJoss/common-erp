@@ -32,6 +32,8 @@ class Payroll extends Model
         'gross_salary',
         'total_deductions',
         'net_salary',
+        'manufacturing_labor_settled',
+        'administrative_salary_expense',
         'payment_date',
         'payment_mode',
         'transaction_reference',
@@ -42,6 +44,8 @@ class Payroll extends Model
 
     protected $casts = [
         'payment_date' => 'date',
+        'manufacturing_labor_settled' => 'decimal:2',
+        'administrative_salary_expense' => 'decimal:2',
     ];
 
     public function company()

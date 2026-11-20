@@ -184,6 +184,19 @@ class DailyOperationController extends Controller
             'distributions.*.batch_no' => 'nullable|string',
             'distributions.*.quantity' => 'required|numeric|min:0.001',
             'distributions.*.notes' => 'nullable|string',
+
+            // Overheads
+            'overheads' => 'nullable|array',
+            'overheads.*.overhead_category' => 'nullable|string|max:50',
+            'overheads.*.expense_ledger_id' => [
+                'nullable',
+                Rule::exists('ledgers', 'id')->where('company_id', $companyId),
+            ],
+            'overheads.*.allocation_method' => 'nullable|string|max:50',
+            'overheads.*.allocation_basis_value' => 'nullable|numeric|min:0',
+            'overheads.*.rate_per_unit' => 'nullable|numeric|min:0',
+            'overheads.*.allocated_amount' => 'nullable|numeric|min:0',
+            'overheads.*.notes' => 'nullable|string',
         ]);
 
         $validated['company_id'] = $companyId;
@@ -194,6 +207,7 @@ class DailyOperationController extends Controller
         $outputs = $request->input('outputs', []);
         $wastages = $request->input('wastages', []);
         $distributions = $request->input('distributions', []);
+        $overheads = $request->input('overheads', []);
 
         try {
             $operation = $this->operationService->createOperation(
@@ -203,6 +217,7 @@ class DailyOperationController extends Controller
                 $outputs,
                 $wastages,
                 $distributions,
+                $overheads,
                 auth()->id() ?? 1
             );
 
@@ -295,6 +310,29 @@ class DailyOperationController extends Controller
             $this->operationService->rejectOperation($daily_operation, auth()->id() ?? 1, $reason);
             AuditLog::log('daily_operations', 'reject', "Rejected Daily Operation #{$daily_operation->operation_number}: {$reason}");
             return back()->with('warning', "Operation {$daily_operation->operation_number} rejected.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Reverse an already posted operation and roll back stock and accounting.
+     */
+    public function reverse(Request $request, DailyOperation $daily_operation)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($daily_operation->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company daily operation.');
+        }
+
+        $data = $request->validate([
+            'reversal_reason' => 'required|string|min:5|max:1000',
+        ]);
+
+        try {
+            $this->operationService->reverseOperation($daily_operation, auth()->id() ?? 1, $data['reversal_reason']);
+            AuditLog::log('daily_operations', 'reverse', "Reversed Daily Operation #{$daily_operation->operation_number}: {$data['reversal_reason']}");
+            return back()->with('success', "Operation {$daily_operation->operation_number} reversed successfully. Stock and accounting vouchers have been rolled back.");
         } catch (\Exception $e) {
             return back()->withErrors(['error' => $e->getMessage()]);
         }

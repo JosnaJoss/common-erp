@@ -30,10 +30,13 @@ class DailyOperation extends Model
         'rejection_reason',
         'stock_posted',
         'stock_posted_at',
+        'reversed_at',
+        'reversed_by',
         'journal_entry_id',
         'total_labor_cost',
         'total_material_cost',
         'total_wastage_cost',
+        'total_overhead_cost',
         'remarks',
         'created_by',
     ];
@@ -42,10 +45,12 @@ class DailyOperation extends Model
         'operation_date' => 'date',
         'approval_date' => 'datetime',
         'stock_posted_at' => 'datetime',
+        'reversed_at' => 'datetime',
         'stock_posted' => 'boolean',
         'total_labor_cost' => 'decimal:2',
         'total_material_cost' => 'decimal:2',
         'total_wastage_cost' => 'decimal:2',
+        'total_overhead_cost' => 'decimal:2',
     ];
 
     public function company()
@@ -117,6 +122,16 @@ class DailyOperation extends Model
     public function journalEntry()
     {
         return $this->belongsTo(JournalEntry::class);
+    }
+
+    public function reverser()
+    {
+        return $this->belongsTo(User::class, 'reversed_by');
+    }
+
+    public function overheadAllocations()
+    {
+        return $this->hasMany(ManufacturingOverheadAllocation::class);
     }
 
     /**
