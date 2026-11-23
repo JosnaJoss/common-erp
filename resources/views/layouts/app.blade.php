@@ -31,9 +31,15 @@
         /* Sidebar Styling */
         #sidebar {
             width: 270px;
+            height: 100vh;
+            position: sticky;
+            top: 0;
+            align-self: flex-start;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
             background-color: var(--sidebar-bg);
             color: var(--sidebar-text);
-            min-height: 100vh;
             transition: all 0.25s ease;
             z-index: 1000;
         }
@@ -47,6 +53,7 @@
             align-items: center;
             border-bottom: 1px solid #1e293b;
             text-decoration: none;
+            flex-shrink: 0;
         }
 
         .sidebar-brand i {
@@ -57,8 +64,41 @@
 
         .sidebar-nav {
             padding: 1rem 0;
+            flex: 1;
+            min-height: 0;
             overflow-y: auto;
-            max-height: calc(100vh - 75px);
+            overflow-x: hidden;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+        }
+
+        .sidebar-nav::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sidebar-nav::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar-nav::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 3px;
+        }
+
+        .sidebar-nav::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        @media (max-width: 767.98px) {
+            #sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                bottom: 0;
+                height: 100vh;
+                z-index: 1050;
+                box-shadow: 4px 0 24px rgba(0, 0, 0, 0.25);
+            }
         }
 
         .sidebar-heading {
@@ -375,6 +415,21 @@
         </div>
     </nav>
 
+    <!-- Immediate synchronous scroll restoration for sidebar -->
+    <script>
+        (function() {
+            try {
+                var nav = document.querySelector('.sidebar-nav');
+                if (nav) {
+                    var saved = sessionStorage.getItem('common_erp_sidebar_scroll');
+                    if (saved !== null) {
+                        nav.scrollTop = parseInt(saved, 10);
+                    }
+                }
+            } catch (e) {}
+        })();
+    </script>
+
     <!-- CONTENT WRAPPER -->
     <div class="content-area">
         <!-- TOP NAVBAR -->
@@ -498,7 +553,7 @@
             </div>
             @endif
 
-            @if($errors->any())
+            @if(isset($errors) && $errors->any())
             <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
                 <div class="fw-bold mb-1"><i class="bi bi-exclamation-octagon-fill me-1"></i> Please fix the following errors:</div>
                 <ul class="mb-0 ps-3">
@@ -521,9 +576,101 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-    document.getElementById('sidebarToggle')?.addEventListener('click', function() {
-        const sidebar = document.getElementById('sidebar');
-        sidebar.classList.toggle('d-none');
+    document.addEventListener('DOMContentLoaded', function() {
+        // Mobile sidebar drawer toggle
+        document.getElementById('sidebarToggle')?.addEventListener('click', function() {
+            const sidebar = document.getElementById('sidebar');
+            if (sidebar) {
+                sidebar.classList.toggle('d-none');
+            }
+        });
+
+        // Sidebar scroll preservation & intelligent active item visibility
+        const sidebarNav = document.querySelector('.sidebar-nav');
+        if (sidebarNav) {
+            // Restore scroll position from sessionStorage
+            const restoreSidebarScroll = function() {
+                try {
+                    const savedPos = sessionStorage.getItem('common_erp_sidebar_scroll');
+                    if (savedPos !== null) {
+                        sidebarNav.scrollTop = parseInt(savedPos, 10);
+                    }
+                } catch (e) {}
+            };
+
+            // Initial restore
+            restoreSidebarScroll();
+
+            // Handle active menu item visibility
+            const activeItem = sidebarNav.querySelector('.nav-link-custom.active');
+            if (activeItem) {
+                // Ensure parent collapse is expanded if inside one
+                const parentCollapse = activeItem.closest('.collapse');
+                if (parentCollapse && !parentCollapse.classList.contains('show')) {
+                    if (window.bootstrap && bootstrap.Collapse) {
+                        const bsCol = bootstrap.Collapse.getOrCreateInstance(parentCollapse, { toggle: false });
+                        bsCol.show();
+                    } else {
+                        parentCollapse.classList.add('show');
+                    }
+                }
+
+                // Check visibility: only scroll if genuinely outside the visible sidebar area
+                const navRect = sidebarNav.getBoundingClientRect();
+                const activeRect = activeItem.getBoundingClientRect();
+                const isAbove = activeRect.top < navRect.top;
+                const isBelow = activeRect.bottom > navRect.bottom;
+
+                if (isAbove || isBelow) {
+                    activeItem.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+                    try {
+                        sessionStorage.setItem('common_erp_sidebar_scroll', sidebarNav.scrollTop);
+                    } catch (e) {}
+                }
+            }
+
+            // Save scroll position on scroll (debounced)
+            let scrollDebounce;
+            sidebarNav.addEventListener('scroll', function() {
+                clearTimeout(scrollDebounce);
+                scrollDebounce = setTimeout(function() {
+                    try {
+                        sessionStorage.setItem('common_erp_sidebar_scroll', sidebarNav.scrollTop);
+                    } catch (e) {}
+                }, 40);
+            }, { passive: true });
+
+            // Capture exact scroll position immediately when clicking any navigation link in sidebar
+            sidebarNav.addEventListener('click', function(e) {
+                const link = e.target.closest('a');
+                if (link && link.getAttribute('href') && !link.getAttribute('href').startsWith('#')) {
+                    try {
+                        sessionStorage.setItem('common_erp_sidebar_scroll', sidebarNav.scrollTop);
+                    } catch (e) {}
+                }
+            });
+
+            // Capture position before page unloads
+            window.addEventListener('beforeunload', function() {
+                try {
+                    sessionStorage.setItem('common_erp_sidebar_scroll', sidebarNav.scrollTop);
+                } catch (e) {}
+            });
+
+            // Update stored position when submenus finish expanding/collapsing
+            sidebarNav.querySelectorAll('.collapse').forEach(function(col) {
+                col.addEventListener('shown.bs.collapse', function() {
+                    try {
+                        sessionStorage.setItem('common_erp_sidebar_scroll', sidebarNav.scrollTop);
+                    } catch (e) {}
+                });
+                col.addEventListener('hidden.bs.collapse', function() {
+                    try {
+                        sessionStorage.setItem('common_erp_sidebar_scroll', sidebarNav.scrollTop);
+                    } catch (e) {}
+                });
+            });
+        }
     });
 </script>
 @stack('scripts')
