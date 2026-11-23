@@ -233,6 +233,15 @@ class PayrollController extends Controller
             'transaction_reference' => 'nullable|string|max:100',
         ]);
 
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['payment_date'])
+            ->where('end_date', '>=', $data['payment_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->with('error', 'Cannot disburse salary in a closed financial year period.');
+        }
+
         DB::transaction(function () use ($companyId, $data, $payroll) {
             $this->disburseSinglePayroll($payroll, $data, $companyId);
         });
@@ -267,6 +276,15 @@ class PayrollController extends Controller
 
         if ($payrolls->isEmpty()) {
             return back()->with('error', 'No eligible generated payroll records selected for disbursement.');
+        }
+
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['payment_date'])
+            ->where('end_date', '>=', $data['payment_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->with('error', 'Cannot disburse salary in a closed financial year period.');
         }
 
         $disbursedCount = 0;

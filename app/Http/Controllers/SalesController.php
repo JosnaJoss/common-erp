@@ -650,12 +650,12 @@ class SalesController extends Controller
         $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
-            ->where('start_date', '<=', $data['invoice_date'])
-            ->where('end_date', '>=', $data['invoice_date'])
+            ->where('start_date', '<=', $data['return_date'])
+            ->where('end_date', '>=', $data['return_date'])
             ->where('is_closed', true)
             ->exists();
         if ($isClosedPeriod) {
-            return back()->withInput()->withErrors(['invoice_date' => 'Cannot record sales invoice in a closed financial year period.']);
+            return back()->withInput()->withErrors(['return_date' => 'Cannot record sales return in a closed financial year period.']);
         }
 
         return DB::transaction(function () use ($companyId, $data) {
@@ -919,6 +919,17 @@ class SalesController extends Controller
             'collected_by' => 'nullable|string|max:100',
             'remarks' => 'nullable|string',
         ]);
+
+        $customer = Customer::where('company_id', $companyId)->findOrFail($data['customer_id']);
+
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['collection_date'])
+            ->where('end_date', '>=', $data['collection_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->withErrors(['collection_date' => 'Cannot record collection in a closed financial year period.']);
+        }
 
         $colNo = 'COL-' . date('Y') . '-' . sprintf('%04d', CustomerCollection::where('company_id', $companyId)->count() + 1);
 

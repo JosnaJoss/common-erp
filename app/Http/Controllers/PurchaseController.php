@@ -976,12 +976,12 @@ class PurchaseController extends Controller
         $godown = Godown::where('company_id', $companyId)->findOrFail($data['godown_id']);
 
         $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
-            ->where('start_date', '<=', $data['invoice_date'])
-            ->where('end_date', '>=', $data['invoice_date'])
+            ->where('start_date', '<=', $data['return_date'])
+            ->where('end_date', '>=', $data['return_date'])
             ->where('is_closed', true)
             ->exists();
         if ($isClosedPeriod) {
-            return back()->withInput()->withErrors(['invoice_date' => 'Cannot record purchase entry in a closed financial year period.']);
+            return back()->withInput()->withErrors(['return_date' => 'Cannot record purchase return in a closed financial year period.']);
         }
 
         return DB::transaction(function () use ($companyId, $data) {
@@ -1137,6 +1137,17 @@ class PurchaseController extends Controller
             'transaction_reference' => 'nullable|string|max:100',
             'remarks' => 'nullable|string',
         ]);
+
+        $supplier = Supplier::where('company_id', $companyId)->findOrFail($data['supplier_id']);
+
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['payment_date'])
+            ->where('end_date', '>=', $data['payment_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->withErrors(['payment_date' => 'Cannot record supplier payment in a closed financial year period.']);
+        }
 
         $payNo = 'PAY-' . date('Y') . '-' . sprintf('%04d', SupplierPayment::where('company_id', $companyId)->count() + 1);
 

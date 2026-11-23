@@ -370,6 +370,7 @@ class PettyCashController extends Controller
                 'Assets'
             );
 
+            $txRef = $data['transaction_reference'] ?? 'Direct';
             // Double Entry: Dr Petty Cash Ledger, Cr Bank Ledger
             $jv = $accountingService->createJournalEntry(
                 $companyId,
@@ -379,7 +380,7 @@ class PettyCashController extends Controller
                 "Petty Cash Replenishment {$repNo} for {$account->name} via {$bankLedger->name}",
                 [
                     ['ledger_id' => $pettyCashLedger->id, 'debit' => $amount, 'credit' => 0, 'narration' => "Cash received for replenishment"],
-                    ['ledger_id' => $bankLedger->id, 'debit' => 0, 'credit' => $amount, 'narration' => "Funds disbursed from bank ({$data['transaction_reference']})"],
+                    ['ledger_id' => $bankLedger->id, 'debit' => 0, 'credit' => $amount, 'narration' => "Funds disbursed from bank ({$txRef})"],
                 ],
                 'PettyCashReplenishment',
                 null,

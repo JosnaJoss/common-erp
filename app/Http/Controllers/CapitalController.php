@@ -93,7 +93,7 @@ class CapitalController extends Controller
                 $companyId,
                 "Capital Account - {$data['name']}",
                 'Capital Account',
-                'Liabilities'
+                'Equity'
             );
 
             if ($opening > 0) {
@@ -200,13 +200,22 @@ class CapitalController extends Controller
             return back()->withInput()->with('error', "Drawings amount (₹" . number_format($amount, 2) . ") exceeds current capital balance of ₹" . number_format($investor->current_balance, 2));
         }
 
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['transaction_date'])
+            ->where('end_date', '>=', $data['transaction_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->with('error', 'Cannot record capital transaction in a closed financial year period.');
+        }
+
         return DB::transaction(function () use ($companyId, $data, $investor, $depositLedger, $amount, $type) {
             $accountingService = new AccountingService();
             $investorLedger = $investor->ledger ?: $accountingService->getOrCreateStandardLedger(
                 $companyId,
                 "Capital Account - {$investor->name}",
                 'Capital Account',
-                'Liabilities'
+                'Equity'
             );
 
             $prefix = $type === 'contribution' ? 'CAP' : 'DRW';
