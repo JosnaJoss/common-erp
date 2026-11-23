@@ -67,11 +67,25 @@
                     @endphp
                     <tr>
                         <td class="ps-4">
-                            <div class="fw-bold text-dark">{{ $item->name }}</div>
-                            <span class="badge bg-light text-muted border">{{ $item->code }}</span>
-                            @if($item->weight > 0)
-                                <small class="text-muted ms-1">({{ $item->weight }} kg)</small>
-                            @endif
+                            <div class="d-flex align-items-center gap-2">
+                                @if($item->image)
+                                    <img src="{{ asset('storage/' . $item->image) }}" alt="{{ $item->name }}" class="rounded border" style="width: 44px; height: 44px; object-fit: cover;">
+                                @else
+                                    <div class="rounded border bg-light d-flex align-items-center justify-content-center text-muted" style="width: 44px; height: 44px; font-size: 1.25rem;">
+                                        <i class="bi bi-box-seam"></i>
+                                    </div>
+                                @endif
+                                <div>
+                                    <div class="fw-bold text-dark">{{ $item->name }}</div>
+                                    <span class="badge bg-light text-muted border">{{ $item->code }}</span>
+                                    @if($item->product)
+                                        <span class="badge bg-info-subtle text-info border border-info-subtle">{{ $item->product->name }}</span>
+                                    @endif
+                                    @if($item->weight > 0)
+                                        <small class="text-muted ms-1">({{ $item->weight }} kg)</small>
+                                    @endif
+                                </div>
+                            </div>
                         </td>
                         <td>
                             <span class="badge bg-secondary-subtle text-secondary text-capitalize mb-1 d-inline-block">

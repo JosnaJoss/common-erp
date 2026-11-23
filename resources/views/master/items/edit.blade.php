@@ -11,7 +11,7 @@
                 <a href="{{ route('master.items.index') }}" class="btn btn-sm btn-outline-secondary">Back to List</a>
             </div>
             <div class="card-body p-4">
-                <form action="{{ route('master.items.update', $item) }}" method="POST">
+                <form action="{{ route('master.items.update', $item) }}" method="POST" enctype="multipart/form-data">
                     @csrf
                     @method('PUT')
 
@@ -26,8 +26,9 @@
                         </div>
                     </div>
 
+                    <!-- CLASSIFICATION HIERARCHY -->
                     <div class="row g-3 mb-3">
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold small">Category</label>
                             <select name="category_id" class="form-select">
                                 <option value="">Select Category</option>
@@ -36,7 +37,7 @@
                                 @endforeach
                             </select>
                         </div>
-                        <div class="col-md-3">
+                        <div class="col-md-4">
                             <label class="form-label fw-semibold small">Subcategory</label>
                             <select name="subcategory_id" class="form-select">
                                 <option value="">Select Subcategory</option>
@@ -45,6 +46,18 @@
                                 @endforeach
                             </select>
                         </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold small">Parent Product</label>
+                            <select name="product_id" class="form-select">
+                                <option value="">Select Product (Optional)</option>
+                                @foreach($products as $prod)
+                                <option value="{{ $prod->id }}" {{ old('product_id', $item->product_id) == $prod->id ? 'selected' : '' }}>{{ $prod->name }} ({{ $prod->code }})</option>
+                                @endforeach
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
                         <div class="col-md-3">
                             <label class="form-label fw-semibold small">Unit of Measure <span class="text-danger">*</span></label>
                             <select name="unit_id" class="form-select" required>
@@ -61,6 +74,14 @@
                                 <option value="raw_material" {{ old('item_type', $item->item_type) == 'raw_material' ? 'selected' : '' }}>Raw Material</option>
                                 <option value="both" {{ old('item_type', $item->item_type) == 'both' ? 'selected' : '' }}>Both (Sales & Raw)</option>
                             </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold small">HSN Code</label>
+                            <input type="text" name="hsn_code" class="form-control" value="{{ old('hsn_code', $item->hsn_code) }}">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold small">Weight (in KG per unit)</label>
+                            <input type="number" step="0.001" name="weight" class="form-control" value="{{ old('weight', $item->weight) }}">
                         </div>
                     </div>
 
@@ -84,7 +105,7 @@
                     </div>
 
                     <div class="row g-3 mb-3">
-                        <div class="col-md-3">
+                        <div class="col-md-6">
                             <label class="form-label fw-semibold small">GST Percentage (%) <span class="text-danger">*</span></label>
                             <select name="gst_percentage" class="form-select" required>
                                 <option value="0" {{ old('gst_percentage', $item->gst_percentage) == '0' ? 'selected' : '' }}>0% (Exempt)</option>
@@ -94,17 +115,42 @@
                                 <option value="28" {{ old('gst_percentage', $item->gst_percentage) == '28' ? 'selected' : '' }}>28%</option>
                             </select>
                         </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-semibold small">HSN Code</label>
-                            <input type="text" name="hsn_code" class="form-control" value="{{ old('hsn_code', $item->hsn_code) }}">
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label fw-semibold small">Weight (in KG per unit)</label>
-                            <input type="number" step="0.001" name="weight" class="form-control" value="{{ old('weight', $item->weight) }}">
-                        </div>
-                        <div class="col-md-3">
+                        <div class="col-md-6">
                             <label class="form-label fw-semibold small">Reorder Quantity Level <span class="text-danger">*</span></label>
                             <input type="number" step="0.01" name="reorder_quantity" class="form-control" value="{{ old('reorder_quantity', $item->reorder_quantity) }}" required>
+                        </div>
+                    </div>
+
+                    <!-- ITEM IMAGE EDIT & REPLACEMENT -->
+                    <div class="border rounded p-3 mb-3 bg-light">
+                        <h6 class="fw-bold mb-3 text-secondary"><i class="bi bi-image me-1"></i> Item / Product Image</h6>
+                        <div class="row g-3 align-items-center">
+                            <div class="col-auto">
+                                <div id="image-preview-container" class="border rounded d-flex align-items-center justify-content-center bg-white shadow-sm" style="width: 80px; height: 80px; overflow: hidden;">
+                                    @if($item->image)
+                                        <img id="image-preview" src="{{ asset('storage/' . $item->image) }}" alt="{{ $item->name }}" class="w-100 h-100" style="object-fit: contain;">
+                                        <i class="bi bi-card-image text-muted d-none" style="font-size: 2.2rem;" id="placeholder-icon"></i>
+                                    @else
+                                        <i class="bi bi-card-image text-muted" style="font-size: 2.2rem;" id="placeholder-icon"></i>
+                                        <img id="image-preview" src="#" alt="Preview" class="d-none w-100 h-100" style="object-fit: contain;">
+                                    @endif
+                                </div>
+                            </div>
+                            <div class="col">
+                                <label class="form-label fw-semibold small mb-1">
+                                    {{ $item->image ? 'Replace Item Image' : 'Upload Item Image' }}
+                                </label>
+                                <input type="file" name="image" id="item-image-input" class="form-control" accept="image/jpeg,image/png,image/jpg,image/webp,image/gif">
+                                <div class="form-text text-muted" style="font-size: 0.75rem;">Supported formats: JPG, PNG, WEBP, GIF. Max file size: 2MB.</div>
+                                @if($item->image)
+                                <div class="form-check mt-2">
+                                    <input class="form-check-input" type="checkbox" name="remove_image" value="1" id="removeImageCheck">
+                                    <label class="form-check-label text-danger small" for="removeImageCheck">
+                                        <i class="bi bi-trash me-1"></i> Remove current image
+                                    </label>
+                                </div>
+                                @endif
+                            </div>
                         </div>
                     </div>
 
@@ -127,3 +173,23 @@
 </div>
 @endsection
 
+@push('scripts')
+<script>
+    document.getElementById('item-image-input')?.addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = document.getElementById('image-preview');
+                const icon = document.getElementById('placeholder-icon');
+                if (img && icon) {
+                    img.src = e.target.result;
+                    img.classList.remove('d-none');
+                    icon.classList.add('d-none');
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+</script>
+@endpush

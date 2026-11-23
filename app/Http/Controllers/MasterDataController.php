@@ -6,18 +6,26 @@ use App\Models\AuditLog;
 use App\Models\Branch;
 use App\Models\Category;
 use App\Models\City;
+use App\Models\DailyOperation;
 use App\Models\Department;
 use App\Models\Godown;
 use App\Models\Item;
 use App\Models\Location;
 use App\Models\Product;
+use App\Models\PurchaseRequest;
 use App\Models\Route;
+use App\Models\SalesDelivery;
+use App\Models\Staff;
+use App\Models\StockBatch;
+use App\Models\StockMovement;
+use App\Models\StockTransfer;
 use App\Models\Subcategory;
 use App\Models\Unit;
 use App\Models\Vehicle;
 use App\Services\CompanyContextService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
 class MasterDataController extends Controller
@@ -39,8 +47,18 @@ class MasterDataController extends Controller
                 'nullable',
                 Rule::exists('branches', 'id')->where('company_id', $companyId),
             ],
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('departments', 'name')->where('company_id', $companyId),
+            ],
+            'code' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('departments', 'code')->where('company_id', $companyId),
+            ],
             'address' => 'nullable|string',
             'postal_code' => 'nullable|string|max:20',
             'department_head' => 'nullable|string|max:100',
@@ -67,8 +85,18 @@ class MasterDataController extends Controller
                 'nullable',
                 Rule::exists('branches', 'id')->where('company_id', $companyId),
             ],
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('departments', 'name')->where('company_id', $companyId)->ignore($department->id),
+            ],
+            'code' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('departments', 'code')->where('company_id', $companyId)->ignore($department->id),
+            ],
             'address' => 'nullable|string',
             'postal_code' => 'nullable|string|max:20',
             'department_head' => 'nullable|string|max:100',
@@ -86,6 +114,22 @@ class MasterDataController extends Controller
         $companyId = CompanyContextService::getActiveCompanyId();
         if ($department->company_id != $companyId) {
             abort(403, 'Unauthorized access to cross-company department.');
+        }
+
+        if (Staff::where('department_id', $department->id)->exists()) {
+            return back()->with('error', 'Cannot delete department: Staff members are assigned to this department.');
+        }
+
+        if (DailyOperation::where('department_id', $department->id)->exists()) {
+            return back()->with('error', 'Cannot delete department: Daily operations and manufacturing records are linked to this department.');
+        }
+
+        if (PurchaseRequest::where('department_id', $department->id)->exists()) {
+            return back()->with('error', 'Cannot delete department: Purchase requests are linked to this department.');
+        }
+
+        if (Godown::where('department_id', $department->id)->exists()) {
+            return back()->with('error', 'Cannot delete department: Warehouses/godowns are associated with this department.');
         }
 
         $department->delete();
@@ -110,8 +154,18 @@ class MasterDataController extends Controller
                 'nullable',
                 Rule::exists('branches', 'id')->where('company_id', $companyId),
             ],
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('godowns', 'name')->where('company_id', $companyId),
+            ],
+            'code' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('godowns', 'code')->where('company_id', $companyId),
+            ],
             'address' => 'nullable|string',
             'postal_code' => 'nullable|string|max:20',
             'responsible_staff' => 'nullable|string|max:100',
@@ -137,8 +191,18 @@ class MasterDataController extends Controller
                 'nullable',
                 Rule::exists('branches', 'id')->where('company_id', $companyId),
             ],
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('godowns', 'name')->where('company_id', $companyId)->ignore($godown->id),
+            ],
+            'code' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('godowns', 'code')->where('company_id', $companyId)->ignore($godown->id),
+            ],
             'address' => 'nullable|string',
             'postal_code' => 'nullable|string|max:20',
             'responsible_staff' => 'nullable|string|max:100',
@@ -155,6 +219,28 @@ class MasterDataController extends Controller
         $companyId = CompanyContextService::getActiveCompanyId();
         if ($godown->company_id != $companyId) {
             abort(403, 'Unauthorized access to cross-company godown.');
+        }
+
+        // 1. Guard against active stock in warehouse
+        if (StockBatch::where('godown_id', $godown->id)->where('quantity', '>', 0)->exists()) {
+            return back()->with('error', 'Cannot delete warehouse/godown with active inventory (stock quantity > 0).');
+        }
+
+        // 2. Guard against historical movements & transactions
+        if (StockMovement::where('godown_id', $godown->id)->exists()) {
+            return back()->with('error', 'Cannot delete warehouse/godown: Stock movement records exist for this location.');
+        }
+
+        if (StockTransfer::where('source_godown_id', $godown->id)->orWhere('dest_godown_id', $godown->id)->exists()) {
+            return back()->with('error', 'Cannot delete warehouse/godown: Stock transfer records reference this location.');
+        }
+
+        if (DB::table('purchase_entries')->where('godown_id', $godown->id)->exists()) {
+            return back()->with('error', 'Cannot delete warehouse/godown: Purchase entry transactions reference this location.');
+        }
+
+        if (DB::table('sales_invoices')->where('godown_id', $godown->id)->exists()) {
+            return back()->with('error', 'Cannot delete warehouse/godown: Sales invoice transactions reference this location.');
         }
 
         $godown->delete();
@@ -174,8 +260,18 @@ class MasterDataController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'symbol' => 'required|string|max:20',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('units', 'name')->where('company_id', $companyId),
+            ],
+            'symbol' => [
+                'required',
+                'string',
+                'max:20',
+                Rule::unique('units', 'symbol')->where('company_id', $companyId),
+            ],
             'unit_type' => 'required|in:weight,quantity,length,volume,other',
             'conversion_factor' => 'required|numeric|min:0.0001',
             'status' => 'required|in:active,inactive',
@@ -196,8 +292,18 @@ class MasterDataController extends Controller
         }
 
         $data = $request->validate([
-            'name' => 'required|string|max:255',
-            'symbol' => 'required|string|max:20',
+            'name' => [
+                'required',
+                'string',
+                'max:255',
+                Rule::unique('units', 'name')->where('company_id', $companyId)->ignore($unit->id),
+            ],
+            'symbol' => [
+                'required',
+                'string',
+                'max:20',
+                Rule::unique('units', 'symbol')->where('company_id', $companyId)->ignore($unit->id),
+            ],
             'unit_type' => 'required|in:weight,quantity,length,volume,other',
             'conversion_factor' => 'required|numeric|min:0.0001',
             'status' => 'required|in:active,inactive',
@@ -206,6 +312,30 @@ class MasterDataController extends Controller
         $unit->update($data);
         AuditLog::log('master', 'update', "Updated unit {$unit->symbol}");
         return back()->with('success', 'Unit updated successfully.');
+    }
+
+    public function unitDestroy(Unit $unit)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($unit->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company unit.');
+        }
+
+        if (Item::where('unit_id', $unit->id)->exists()) {
+            return back()->with('error', 'Cannot delete unit: It is assigned to one or more catalog items.');
+        }
+
+        if (DB::table('purchase_entry_items')->where('unit_id', $unit->id)->exists()) {
+            return back()->with('error', 'Cannot delete unit: It is referenced by purchase entry line items.');
+        }
+
+        if (DB::table('sales_invoice_items')->where('unit_id', $unit->id)->exists()) {
+            return back()->with('error', 'Cannot delete unit: It is referenced by sales invoice line items.');
+        }
+
+        $unit->delete();
+        AuditLog::log('master', 'delete', "Deleted unit {$unit->symbol}");
+        return back()->with('success', 'Unit deleted successfully.');
     }
 
     // ==================== CATEGORIES & PRODUCTS ====================
@@ -487,7 +617,12 @@ class MasterDataController extends Controller
                 Rule::exists('units', 'id')->where('company_id', $companyId),
             ],
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50',
+            'code' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('items', 'code')->where('company_id', $companyId),
+            ],
             'item_type' => 'required|in:sales_item,raw_material,both',
             'weight' => 'nullable|numeric|min:0',
             'min_price' => 'required|numeric|min:0',
@@ -497,6 +632,7 @@ class MasterDataController extends Controller
             'hsn_code' => 'nullable|string|max:50',
             'reorder_quantity' => 'required|numeric|min:0',
             'status' => 'required|in:active,inactive',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,webp,gif|max:2048',
             'opening_stock' => 'nullable|numeric|min:0',
             'opening_unit_cost' => 'nullable|numeric|min:0',
             'opening_godown_id' => [
@@ -505,8 +641,13 @@ class MasterDataController extends Controller
             ],
         ]);
 
-        $itemData = collect($data)->except(['opening_stock', 'opening_unit_cost', 'opening_godown_id'])->toArray();
+        $itemData = collect($data)->except(['opening_stock', 'opening_unit_cost', 'opening_godown_id', 'image'])->toArray();
         $itemData['company_id'] = $companyId;
+
+        if ($request->hasFile('image')) {
+            $itemData['image'] = $request->file('image')->store('items', 'public');
+        }
+
         $item = Item::create($itemData);
 
         if (!empty($data['opening_stock']) && (float)$data['opening_stock'] > 0 && !empty($data['opening_godown_id'])) {
@@ -570,7 +711,12 @@ class MasterDataController extends Controller
                 Rule::exists('units', 'id')->where('company_id', $companyId),
             ],
             'name' => 'required|string|max:255',
-            'code' => 'required|string|max:50',
+            'code' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('items', 'code')->where('company_id', $companyId)->ignore($item->id),
+            ],
             'item_type' => 'required|in:sales_item,raw_material,both',
             'weight' => 'nullable|numeric|min:0',
             'min_price' => 'required|numeric|min:0',
@@ -580,7 +726,22 @@ class MasterDataController extends Controller
             'hsn_code' => 'nullable|string|max:50',
             'reorder_quantity' => 'required|numeric|min:0',
             'status' => 'required|in:active,inactive',
+            'image' => 'nullable|image|mimes:jpeg,png,jpg,webp,gif|max:2048',
+            'remove_image' => 'nullable|boolean',
         ]);
+
+        if ($request->boolean('remove_image')) {
+            if ($item->image && Storage::disk('public')->exists($item->image)) {
+                Storage::disk('public')->delete($item->image);
+            }
+            $data['image'] = null;
+        } elseif ($request->hasFile('image')) {
+            if ($item->image && Storage::disk('public')->exists($item->image)) {
+                Storage::disk('public')->delete($item->image);
+            }
+            $data['image'] = $request->file('image')->store('items', 'public');
+        }
+        unset($data['remove_image']);
 
         $item->update($data);
         AuditLog::log('master', 'update', "Updated Item {$item->name}");
@@ -592,6 +753,14 @@ class MasterDataController extends Controller
         $companyId = CompanyContextService::getActiveCompanyId();
         if ($item->company_id != $companyId) {
             abort(403, 'Unauthorized access to cross-company item.');
+        }
+
+        if (StockBatch::where('item_id', $item->id)->where('quantity', '>', 0)->exists()) {
+            return back()->with('error', 'Cannot delete item with active stock in warehouse.');
+        }
+
+        if ($item->image && Storage::disk('public')->exists($item->image)) {
+            Storage::disk('public')->delete($item->image);
         }
 
         $item->delete();
@@ -612,10 +781,18 @@ class MasterDataController extends Controller
     {
         $companyId = CompanyContextService::getActiveCompanyId();
         $data = $request->validate([
-            'branch_id' => 'nullable|exists:branches,id',
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
             'vehicle_name' => 'required|string|max:255',
             'vehicle_type' => 'required|string|max:50',
-            'registration_number' => 'required|string|max:50',
+            'registration_number' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('vehicles', 'registration_number')->where('company_id', $companyId),
+            ],
             'capacity' => 'required|numeric|min:0',
             'assigned_driver' => 'nullable|string|max:100',
             'insurance_expiry_date' => 'nullable|date',
@@ -628,6 +805,62 @@ class MasterDataController extends Controller
 
         AuditLog::log('master', 'create', "Created vehicle {$data['registration_number']}");
         return back()->with('success', 'Vehicle registered successfully.');
+    }
+
+    public function vehicleUpdate(Request $request, Vehicle $vehicle)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($vehicle->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company vehicle.');
+        }
+
+        $data = $request->validate([
+            'branch_id' => [
+                'nullable',
+                Rule::exists('branches', 'id')->where('company_id', $companyId),
+            ],
+            'vehicle_name' => 'required|string|max:255',
+            'vehicle_type' => 'required|string|max:50',
+            'registration_number' => [
+                'required',
+                'string',
+                'max:50',
+                Rule::unique('vehicles', 'registration_number')->where('company_id', $companyId)->ignore($vehicle->id),
+            ],
+            'capacity' => 'required|numeric|min:0',
+            'assigned_driver' => 'nullable|string|max:100',
+            'insurance_expiry_date' => 'nullable|date',
+            'fitness_certificate_expiry_date' => 'nullable|date',
+            'status' => 'required|in:active,maintenance,inactive',
+        ]);
+
+        $vehicle->update($data);
+        AuditLog::log('master', 'update', "Updated vehicle {$vehicle->registration_number}");
+        return back()->with('success', 'Vehicle updated successfully.');
+    }
+
+    public function vehicleDestroy(Vehicle $vehicle)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($vehicle->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company vehicle.');
+        }
+
+        if (SalesDelivery::where('vehicle_id', $vehicle->id)->exists()) {
+            return back()->with('error', 'Cannot delete vehicle: It is referenced by customer sales delivery records.');
+        }
+
+        if (Route::where('vehicle_id', $vehicle->id)->exists()) {
+            return back()->with('error', 'Cannot delete vehicle: It is assigned to active transportation routes.');
+        }
+
+        if (Godown::where('vehicle_id', $vehicle->id)->exists()) {
+            return back()->with('error', 'Cannot delete vehicle: It is assigned as a mobile godown / depot.');
+        }
+
+        $vehicle->delete();
+        AuditLog::log('master', 'delete', "Deleted vehicle {$vehicle->registration_number}");
+        return back()->with('success', 'Vehicle deleted successfully.');
     }
 
     public function routes(Request $request)

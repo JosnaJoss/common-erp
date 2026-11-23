@@ -24,10 +24,11 @@
                         <th>Department Head</th>
                         <th>Responsible Staff</th>
                         <th>Status</th>
+                        <th class="text-end pe-4">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach($departments as $dept)
+                    @forelse($departments as $dept)
                     <tr>
                         <td class="ps-4">
                             <div class="fw-bold">{{ $dept->name }}</div>
@@ -41,12 +42,89 @@
                                 {{ ucfirst($dept->status) }}
                             </span>
                         </td>
+                        <td class="text-end pe-4">
+                            <button class="btn btn-sm btn-light border text-primary" data-bs-toggle="modal" data-bs-target="#editDeptModal{{ $dept->id }}" title="Edit Department">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <form action="{{ route('master.departments.destroy', $dept) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this department?');">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm btn-light border text-danger" title="Delete Department">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
                     </tr>
-                    @endforeach
+
+                    <!-- Edit Dept Modal -->
+                    <div class="modal fade" id="editDeptModal{{ $dept->id }}" tabindex="-1">
+                        <div class="modal-dialog">
+                            <form action="{{ route('master.departments.update', $dept) }}" method="POST" class="modal-content">
+                                @csrf
+                                @method('PUT')
+                                <div class="modal-header">
+                                    <h5 class="modal-title fw-bold">Edit Department: {{ $dept->name }}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body text-start">
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-semibold">Department Name <span class="text-danger">*</span></label>
+                                        <input type="text" name="name" class="form-control" value="{{ old('name', $dept->name) }}" required>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <div class="col-6">
+                                            <label class="form-label small fw-semibold">Department Code <span class="text-danger">*</span></label>
+                                            <input type="text" name="code" class="form-control" value="{{ old('code', $dept->code) }}" required>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label small fw-semibold">Branch</label>
+                                            <select name="branch_id" class="form-select">
+                                                <option value="">Select Branch</option>
+                                                @foreach($branches as $b)
+                                                <option value="{{ $b->id }}" {{ old('branch_id', $dept->branch_id) == $b->id ? 'selected' : '' }}>{{ $b->name }}</option>
+                                                @endforeach
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <div class="col-6">
+                                            <label class="form-label small fw-semibold">Department Head</label>
+                                            <input type="text" name="department_head" class="form-control" value="{{ old('department_head', $dept->department_head) }}">
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label small fw-semibold">Responsible Staff</label>
+                                            <input type="text" name="responsible_staff" class="form-control" value="{{ old('responsible_staff', $dept->responsible_staff) }}">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-semibold">Status</label>
+                                        <select name="status" class="form-select">
+                                            <option value="active" {{ $dept->status === 'active' ? 'selected' : '' }}>Active</option>
+                                            <option value="inactive" {{ $dept->status === 'inactive' ? 'selected' : '' }}>Inactive</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-primary">Update Department</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    @empty
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-muted">No departments found.</td>
+                    </tr>
+                    @endforelse
                 </tbody>
             </table>
         </div>
     </div>
+    @if($departments->hasPages())
+    <div class="card-footer bg-white border-top py-3">
+        {{ $departments->links() }}
+    </div>
+    @endif
 </div>
 
 <!-- Add Dept Modal -->
@@ -104,4 +182,3 @@
     </div>
 </div>
 @endsection
-

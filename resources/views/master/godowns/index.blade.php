@@ -24,10 +24,11 @@
                         <th>Address & PIN</th>
                         <th>Responsible Staff</th>
                         <th>Status</th>
+                        <th class="text-end pe-4">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach($godowns as $godown)
+                    @forelse($godowns as $godown)
                     <tr>
                         <td class="ps-4">
                             <div class="fw-bold">{{ $godown->name }}</div>
@@ -41,12 +42,93 @@
                                 {{ ucfirst($godown->status) }}
                             </span>
                         </td>
+                        <td class="text-end pe-4">
+                            <button class="btn btn-sm btn-light border text-primary" data-bs-toggle="modal" data-bs-target="#editGodownModal{{ $godown->id }}" title="Edit Godown">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            <form action="{{ route('master.godowns.destroy', $godown) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this warehouse/godown?');">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm btn-light border text-danger" title="Delete Godown">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
                     </tr>
-                    @endforeach
+
+                    <!-- Edit Godown Modal -->
+                    <div class="modal fade" id="editGodownModal{{ $godown->id }}" tabindex="-1">
+                        <div class="modal-dialog">
+                            <form action="{{ route('master.godowns.update', $godown) }}" method="POST" class="modal-content">
+                                @csrf
+                                @method('PUT')
+                                <div class="modal-header">
+                                    <h5 class="modal-title fw-bold">Edit Godown: {{ $godown->name }}</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body text-start">
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-semibold">Godown Name <span class="text-danger">*</span></label>
+                                        <input type="text" name="name" class="form-control" value="{{ old('name', $godown->name) }}" required>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <div class="col-6">
+                                            <label class="form-label small fw-semibold">Godown Code <span class="text-danger">*</span></label>
+                                            <input type="text" name="code" class="form-control" value="{{ old('code', $godown->code) }}" required>
+                                        </div>
+                                        <div class="col-6">
+                                            <label class="form-label small fw-semibold">Branch</label>
+                                            <select name="branch_id" class="form-select">
+                                                <option value="">Select Branch</option>
+                                                @foreach($branches as $b)
+                                                <option value="{{ $b->id }}" {{ old('branch_id', $godown->branch_id) == $b->id ? 'selected' : '' }}>{{ $b->name }}</option>
+                                                @endforeach
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="row g-2 mb-3">
+                                        <div class="col-8">
+                                            <label class="form-label small fw-semibold">Address</label>
+                                            <input type="text" name="address" class="form-control" value="{{ old('address', $godown->address) }}">
+                                        </div>
+                                        <div class="col-4">
+                                            <label class="form-label small fw-semibold">Postal Code</label>
+                                            <input type="text" name="postal_code" class="form-control" value="{{ old('postal_code', $godown->postal_code) }}">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-semibold">Responsible In-Charge Staff</label>
+                                        <input type="text" name="responsible_staff" class="form-control" value="{{ old('responsible_staff', $godown->responsible_staff) }}">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label small fw-semibold">Status</label>
+                                        <select name="status" class="form-select">
+                                            <option value="active" {{ $godown->status === 'active' ? 'selected' : '' }}>Active</option>
+                                            <option value="inactive" {{ $godown->status === 'inactive' ? 'selected' : '' }}>Inactive</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-light border" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="submit" class="btn btn-primary">Update Godown</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    @empty
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-muted">No godowns/warehouses found.</td>
+                    </tr>
+                    @endforelse
                 </tbody>
             </table>
         </div>
     </div>
+    @if($godowns->hasPages())
+    <div class="card-footer bg-white border-top py-3">
+        {{ $godowns->links() }}
+    </div>
+    @endif
 </div>
 
 <!-- Add Godown Modal -->
@@ -108,4 +190,3 @@
     </div>
 </div>
 @endsection
-

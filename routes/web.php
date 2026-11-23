@@ -72,6 +72,7 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::get('/units', [MasterDataController::class, 'units'])->name('units.index');
         Route::post('/units', [MasterDataController::class, 'unitStore'])->name('units.store');
         Route::put('/units/{unit}', [MasterDataController::class, 'unitUpdate'])->name('units.update');
+        Route::delete('/units/{unit}', [MasterDataController::class, 'unitDestroy'])->name('units.destroy');
 
         // Categories & Subcategories
         Route::get('/categories', [MasterDataController::class, 'categories'])->name('categories.index');
@@ -100,6 +101,8 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         // Vehicles
         Route::get('/vehicles', [MasterDataController::class, 'vehicles'])->name('vehicles.index');
         Route::post('/vehicles', [MasterDataController::class, 'vehicleStore'])->name('vehicles.store');
+        Route::put('/vehicles/{vehicle}', [MasterDataController::class, 'vehicleUpdate'])->name('vehicles.update');
+        Route::delete('/vehicles/{vehicle}', [MasterDataController::class, 'vehicleDestroy'])->name('vehicles.destroy');
 
         // Territory & Route Management (Routes, Cities, Locations)
         Route::get('/routes', [MasterDataController::class, 'routes'])->name('routes.index');
