@@ -197,7 +197,7 @@ class MasterDataCrudCompletionTest extends TestCase
             ->get(route('master.items.index'));
 
         $responseIndex->assertStatus(200);
-        $responseIndex->assertSee('Items & Products Catalog');
+        $responseIndex->assertSee('Items & Products Catalog', false);
     }
 
     /** @test */
@@ -263,7 +263,7 @@ class MasterDataCrudCompletionTest extends TestCase
             ->delete(route('master.departments.destroy', $dept));
 
         $responseDeleteOk->assertSessionHas('success');
-        $this->assertDatabaseMissing('departments', ['id' => $dept->id]);
+        $this->assertSoftDeleted('departments', ['id' => $dept->id]);
     }
 
     /** @test */
@@ -404,7 +404,7 @@ class MasterDataCrudCompletionTest extends TestCase
             ->delete(route('master.godowns.destroy', $godown));
 
         $responseDeleteOk->assertSessionHas('success');
-        $this->assertDatabaseMissing('godowns', ['id' => $godown->id]);
+        $this->assertSoftDeleted('godowns', ['id' => $godown->id]);
     }
 
     /** @test */
@@ -475,7 +475,7 @@ class MasterDataCrudCompletionTest extends TestCase
             ->delete(route('master.vehicles.destroy', $vehicle));
 
         $responseDeleteOk->assertSessionHas('success');
-        $this->assertDatabaseMissing('vehicles', ['id' => $vehicle->id]);
+        $this->assertSoftDeleted('vehicles', ['id' => $vehicle->id]);
     }
 
     /** @test */
