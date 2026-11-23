@@ -144,6 +144,15 @@ class AccountsController extends Controller
             'lines.*.narration' => 'nullable|string',
         ]);
 
+        $isClosedPeriod = FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['voucher_date'])
+            ->where('end_date', '>=', $data['voucher_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->withErrors(['voucher_date' => 'Cannot record voucher in a closed financial year period.']);
+        }
+
         try {
             $accountingService = new AccountingService();
             $entry = $accountingService->createJournalEntry(
@@ -197,6 +206,22 @@ class AccountsController extends Controller
         AuditLog::log('accounts', 'create_fy', "Created financial year {$data['title']}");
 
         return back()->with('success', 'Financial Year created successfully.');
+    }
+
+    public function financialYearToggleLock(FinancialYear $financialYear)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($financialYear->company_id != $companyId) {
+            abort(403, 'Unauthorized access to cross-company financial year.');
+        }
+
+        $financialYear->is_closed = !$financialYear->is_closed;
+        $financialYear->save();
+
+        $statusStr = $financialYear->is_closed ? 'locked and books closed' : 'reopened for transactions';
+        AuditLog::log('accounts', 'toggle_fy_lock', "Financial year {$financialYear->title} was {$statusStr}.");
+
+        return back()->with('success', "Financial Year {$financialYear->title} has been {$statusStr}.");
     }
 }
 

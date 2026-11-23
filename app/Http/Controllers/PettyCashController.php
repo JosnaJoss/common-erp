@@ -222,6 +222,15 @@ class PettyCashController extends Controller
             return back()->withInput()->with('error', "Insufficient petty cash balance! Available: ₹" . number_format($account->current_balance, 2) . ", Requested: ₹" . number_format($amount, 2));
         }
 
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['voucher_date'])
+            ->where('end_date', '>=', $data['voucher_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->with('error', 'Cannot record petty cash voucher in a closed financial year period.');
+        }
+
         return DB::transaction(function () use ($companyId, $data, $account, $category, $amount, $request) {
             $voucherNo = 'PCV-' . date('Y') . '-' . sprintf('%04d', PettyCashVoucher::where('company_id', $companyId)->count() + 1);
 
@@ -336,6 +345,15 @@ class PettyCashController extends Controller
         $account = PettyCashAccount::findOrFail($data['petty_cash_account_id']);
         if ($account->company_id != $companyId) {
             abort(403);
+        }
+
+        $isClosedPeriod = \App\Models\FinancialYear::where('company_id', $companyId)
+            ->where('start_date', '<=', $data['replenishment_date'])
+            ->where('end_date', '>=', $data['replenishment_date'])
+            ->where('is_closed', true)
+            ->exists();
+        if ($isClosedPeriod) {
+            return back()->withInput()->with('error', 'Cannot record replenishment in a closed financial year period.');
         }
 
         $bankLedger = Ledger::findOrFail($data['bank_ledger_id']);

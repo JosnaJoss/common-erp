@@ -272,6 +272,7 @@ Route::middleware(['auth', 'company.context'])->group(function () {
 
         Route::get('/financial-years', [AccountsController::class, 'financialYears'])->name('financial_years.index');
         Route::post('/financial-years', [AccountsController::class, 'financialYearStore'])->name('financial_years.store');
+        Route::post('/financial-years/{financialYear}/toggle-lock', [AccountsController::class, 'financialYearToggleLock'])->name('financial_years.toggle_lock');
 
         // Bank Reconciliation (BRS)
         Route::prefix('bank-reconciliation')->name('bank_reconciliation.')->group(function () {

@@ -25,6 +25,7 @@
                         <th>End Date</th>
                         <th>Status</th>
                         <th>Lock Status</th>
+                        <th class="text-end">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -51,10 +52,24 @@
                                     <span class="badge bg-success"><i class="bi bi-unlock me-1"></i> Open for Postings</span>
                                 @endif
                             </td>
+                            <td class="text-end">
+                                <form action="{{ route('accounts.financial_years.toggle_lock', $fy) }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to {{ $fy->is_closed ? 'reopen' : 'close and lock' }} this financial year?');">
+                                    @csrf
+                                    @if($fy->is_closed)
+                                        <button type="submit" class="btn btn-sm btn-outline-warning">
+                                            <i class="bi bi-unlock me-1"></i> Reopen Books
+                                        </button>
+                                    @else
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-lock me-1"></i> Close Books
+                                        </button>
+                                    @endif
+                                </form>
+                            </td>
                         </tr>
                     @empty
                         <tr>
-                            <td colspan="5" class="text-center py-4 text-muted">
+                            <td colspan="6" class="text-center py-4 text-muted">
                                 <i class="bi bi-calendar-x fs-2 d-block mb-2"></i> No financial years configured yet.
                             </td>
                         </tr>
