@@ -23,8 +23,30 @@ class Department extends Model
         'head_staff_id',
         'responsible_staff',
         'supervisor_staff_id',
+        'maintains_stock',
+        'default_godown_id',
+        'source_godown_id',
         'status',
     ];
+
+    protected $casts = [
+        'maintains_stock' => 'boolean',
+    ];
+
+    public function defaultGodown()
+    {
+        return $this->belongsTo(Godown::class, 'default_godown_id');
+    }
+
+    public function sourceGodown()
+    {
+        return $this->belongsTo(Godown::class, 'source_godown_id');
+    }
+
+    public function maintainsStock(): bool
+    {
+        return (bool)$this->maintains_stock;
+    }
 
     public function company()
     {

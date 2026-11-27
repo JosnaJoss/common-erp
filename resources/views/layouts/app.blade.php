@@ -304,10 +304,13 @@
             <div class="collapse {{ request()->is('inventory*') ? 'show' : '' }}" id="inventorySubmenu">
                 <div class="sidebar-submenu">
                     <a href="{{ route('inventory.overview') }}" class="nav-link-custom {{ request()->routeIs('inventory.overview') ? 'active' : '' }}">Stock Balances & Batches</a>
+                    <a href="{{ route('inventory.requests.index') }}" class="nav-link-custom {{ request()->routeIs('inventory.requests.*') ? 'active' : '' }}">Internal Stock Requests</a>
+                    <a href="{{ route('inventory.transfers') }}" class="nav-link-custom {{ request()->routeIs('inventory.transfers*') ? 'active' : '' }}">Godown Transfers</a>
+                    <a href="{{ route('inventory.discrepancies.index') }}" class="nav-link-custom {{ request()->routeIs('inventory.discrepancies.*') ? 'active' : '' }}">Transit Discrepancies</a>
+                    <a href="{{ route('inventory.configuration') }}" class="nav-link-custom {{ request()->routeIs('inventory.configuration') ? 'active' : '' }}">Stock Mode Config</a>
                     <a href="{{ route('inventory.movements') }}" class="nav-link-custom {{ request()->routeIs('inventory.movements') ? 'active' : '' }}">Stock Movement Ledger</a>
                     <a href="{{ route('inventory.inward.create') }}" class="nav-link-custom {{ request()->routeIs('inventory.inward.*') ? 'active' : '' }}">Stock Inward</a>
                     <a href="{{ route('inventory.outward.create') }}" class="nav-link-custom {{ request()->routeIs('inventory.outward.*') ? 'active' : '' }}">Stock Outward</a>
-                    <a href="{{ route('inventory.transfers') }}" class="nav-link-custom {{ request()->routeIs('inventory.transfers*') ? 'active' : '' }}">Godown Transfers</a>
                     <a href="{{ route('inventory.adjustments') }}" class="nav-link-custom {{ request()->routeIs('inventory.adjustments*') ? 'active' : '' }}">Stock Adjustments</a>
                     <a href="{{ route('inventory.opening_stock.index') }}" class="nav-link-custom {{ request()->routeIs('inventory.opening_stock.*') ? 'active' : '' }}">Bulk Opening Stock</a>
                     <a href="{{ route('inventory.alerts') }}" class="nav-link-custom {{ request()->routeIs('inventory.alerts*') ? 'active' : '' }}">Low Stock Alerts</a>
@@ -390,6 +393,9 @@
                     <a href="{{ route('reports.purchase.purchase_register') }}" class="nav-link-custom {{ request()->routeIs('reports.purchase.purchase_register') ? 'active' : '' }}">Purchase Register</a>
                     <a href="{{ route('reports.inventory.valuation') }}" class="nav-link-custom {{ request()->routeIs('reports.inventory.valuation') ? 'active' : '' }}">Stock Valuation</a>
                     <a href="{{ route('reports.inventory.reconciliation') }}" class="nav-link-custom {{ request()->routeIs('reports.inventory.reconciliation') ? 'active' : '' }}">Stock Reconciliation</a>
+                    <a href="{{ route('inventory.reports.in_transit') }}" class="nav-link-custom {{ request()->routeIs('inventory.reports.in_transit') ? 'active' : '' }}">In-Transit Stock Report</a>
+                    <a href="{{ route('inventory.reports.location_stock') }}" class="nav-link-custom {{ request()->routeIs('inventory.reports.location_stock') ? 'active' : '' }}">Location-Wise Stock</a>
+                    <a href="{{ route('inventory.reports.material_consumption') }}" class="nav-link-custom {{ request()->routeIs('inventory.reports.material_consumption') ? 'active' : '' }}">Material Consumption</a>
                     <a href="{{ route('reports.sales.customer_outstanding') }}" class="nav-link-custom {{ request()->routeIs('reports.sales.customer_outstanding') ? 'active' : '' }}">Customer Outstanding</a>
                     <a href="{{ route('reports.purchase.supplier_outstanding') }}" class="nav-link-custom {{ request()->routeIs('reports.purchase.supplier_outstanding') ? 'active' : '' }}">Supplier Outstanding</a>
                     <a href="{{ route('reports.staff.payroll_report') }}" class="nav-link-custom {{ request()->routeIs('reports.staff.payroll_report') ? 'active' : '' }}">Payroll Register</a>

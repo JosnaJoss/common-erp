@@ -3,15 +3,22 @@
 namespace App\Http\Controllers;
 
 use App\Models\AuditLog;
+use App\Models\Branch;
+use App\Models\DailyOperationMaterial;
 use App\Models\Department;
 use App\Models\Godown;
 use App\Models\Item;
 use App\Models\StockAdjustment;
 use App\Models\StockAdjustmentItem;
 use App\Models\StockBatch;
+use App\Models\StockDiscrepancy;
+use App\Models\StockDiscrepancyApproval;
 use App\Models\StockMovement;
+use App\Models\StockRequest;
+use App\Models\StockRequestItem;
 use App\Models\StockTransfer;
 use App\Models\StockTransferItem;
+use App\Models\Unit;
 use App\Services\AccountingService;
 use App\Services\CompanyContextService;
 use App\Services\InventoryService;
@@ -562,6 +569,652 @@ class InventoryController extends Controller
             return redirect()->route('inventory.overview', ['godown_id' => $data['godown_id']])
                 ->with('success', "Opening stock successfully recorded for {$count} items with financial ledger balance.");
         });
+    }
+
+    // ==================== INTERNAL STOCK REQUESTS ====================
+
+    public function requests(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = StockRequest::where('company_id', $companyId)
+            ->with(['fromDepartment', 'sourceGodown', 'fromGodown', 'items.item', 'creator', 'approver']);
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->get('status'));
+        }
+        if ($request->filled('from_department_id')) {
+            $query->where('from_department_id', $request->get('from_department_id'));
+        }
+        if ($request->filled('priority')) {
+            $query->where('priority', $request->get('priority'));
+        }
+
+        $requests = $query->latest('request_date')->latest('id')->paginate(15);
+        $departments = Department::where('company_id', $companyId)->where('status', 'active')->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->where('status', 'active')->get();
+
+        return view('inventory.requests.index', compact('requests', 'departments', 'godowns', 'items'));
+    }
+
+    public function requestCreate()
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $departments = Department::where('company_id', $companyId)->where('status', 'active')->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+        $items = Item::where('company_id', $companyId)->where('status', 'active')->with('unit')->get();
+
+        return view('inventory.requests.create', compact('departments', 'godowns', 'items'));
+    }
+
+    public function requestStore(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $data = $request->validate([
+            'from_department_id' => [
+                'required',
+                Rule::exists('departments', 'id')->where('company_id', $companyId),
+            ],
+            'source_godown_id' => [
+                'required',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'from_godown_id' => [
+                'nullable',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'request_date' => 'required|date',
+            'required_date' => 'nullable|date',
+            'priority' => 'required|in:low,medium,high,urgent',
+            'remarks' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.item_id' => [
+                'required',
+                Rule::exists('items', 'id')->where('company_id', $companyId),
+            ],
+            'items.*.quantity' => 'required|numeric|min:0.001',
+            'items.*.preferred_batch_id' => 'nullable|exists:stock_batches,id',
+            'items.*.remarks' => 'nullable|string',
+        ]);
+
+        $dept = Department::where('id', $data['from_department_id'])->first();
+        $branchId = $dept?->branch_id ?? session('active_branch_id');
+
+        $reqData = [
+            'company_id' => $companyId,
+            'branch_id' => $branchId,
+            'from_department_id' => $data['from_department_id'],
+            'source_godown_id' => $data['source_godown_id'],
+            'from_godown_id' => $data['from_godown_id'] ?? null,
+            'request_date' => $data['request_date'],
+            'required_date' => $data['required_date'] ?? null,
+            'priority' => $data['priority'],
+            'remarks' => $data['remarks'] ?? null,
+        ];
+
+        $reqItems = [];
+        foreach ($data['items'] as $itemLine) {
+            $reqItems[] = [
+                'item_id' => $itemLine['item_id'],
+                'requested_qty' => $itemLine['quantity'],
+                'preferred_batch_id' => $itemLine['preferred_batch_id'] ?? null,
+                'remarks' => $itemLine['remarks'] ?? null,
+            ];
+        }
+
+        try {
+            $inventoryService = new InventoryService();
+            $stockRequest = $inventoryService->createStockRequest($reqData, $reqItems, auth()->id() ?? 1);
+            AuditLog::log('inventory', 'request_create', "Created stock request {$stockRequest->request_no}");
+            return redirect()->route('inventory.requests.show', $stockRequest)->with('success', "Stock request {$stockRequest->request_no} submitted successfully.");
+        } catch (\Exception $e) {
+            return back()->withInput()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function requestShow(StockRequest $stockRequest)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($stockRequest->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $stockRequest->load([
+            'fromDepartment', 'sourceGodown', 'fromGodown', 'creator', 'approver',
+            'items.item.unit', 'items.preferredBatch',
+            'transfers.dispatcher', 'transfers.receiver', 'transfers.items.item'
+        ]);
+
+        return view('inventory.requests.show', compact('stockRequest'));
+    }
+
+    public function requestApprove(Request $request, StockRequest $stockRequest)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($stockRequest->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'items' => 'required|array',
+            'items.*.approved_qty' => 'required|numeric|min:0',
+            'remarks' => 'nullable|string',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $approvedLines = [];
+            foreach ($data['items'] as $id => $row) {
+                $approvedLines[] = [
+                    'id' => (int)$id,
+                    'approved_qty' => (float)$row['approved_qty'],
+                ];
+            }
+
+            $inventoryService->approveStockRequest($stockRequest, $approvedLines, auth()->id() ?? 1, $data['remarks'] ?? null);
+            AuditLog::log('inventory', 'request_approve', "Reviewed stock request {$stockRequest->request_no} -> {$stockRequest->status}");
+            return back()->with('success', "Stock request {$stockRequest->request_no} review recorded (Status: {$stockRequest->status}).");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function requestReject(Request $request, StockRequest $stockRequest)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($stockRequest->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'rejection_reason' => 'required|string|min:3',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->rejectStockRequest($stockRequest, $data['rejection_reason'], auth()->id() ?? 1);
+            AuditLog::log('inventory', 'request_reject', "Rejected stock request {$stockRequest->request_no}");
+            return back()->with('success', "Stock request {$stockRequest->request_no} has been rejected.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    // ==================== DISPATCH & IN-TRANSIT ====================
+
+    public function dispatchCreate(StockRequest $stockRequest)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($stockRequest->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        if (!in_array($stockRequest->status, ['approved', 'partially_approved'])) {
+            return back()->withErrors(['error' => "Only approved requests can be dispatched."]);
+        }
+
+        $stockRequest->load(['items.item.unit', 'items.preferredBatch', 'sourceGodown', 'fromGodown']);
+
+        // Load available batches in source godown for each item
+        $itemBatches = [];
+        foreach ($stockRequest->items as $item) {
+            $batches = StockBatch::where('godown_id', $stockRequest->source_godown_id)
+                ->where('item_id', $item->item_id)
+                ->where('quantity', '>', 0)
+                ->get();
+            $itemBatches[$item->id] = $batches;
+        }
+
+        return view('inventory.requests.dispatch', compact('stockRequest', 'itemBatches'));
+    }
+
+    public function dispatchStore(Request $request, StockRequest $stockRequest)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($stockRequest->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'dispatch_reference' => 'nullable|string|max:100',
+            'remarks' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.stock_request_item_id' => 'required|exists:stock_request_items,id',
+            'items.*.batch_no' => 'required|string',
+            'items.*.dispatch_quantity' => 'required|numeric|min:0.001',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $transfer = $inventoryService->dispatchStockRequest(
+                $stockRequest,
+                $data['items'],
+                auth()->id() ?? 1,
+                $data['dispatch_reference'] ?? null,
+                $data['remarks'] ?? null
+            );
+
+            AuditLog::log('inventory', 'dispatch', "Dispatched transfer {$transfer->transfer_no} for request {$stockRequest->request_no}");
+            return redirect()->route('inventory.requests.show', $stockRequest)->with('success', "Transfer {$transfer->transfer_no} dispatched successfully (In-Transit).");
+        } catch (\Exception $e) {
+            return back()->withInput()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    // ==================== RECEIPT CONFIRMATION ====================
+
+    public function receiptCreate(StockTransfer $transfer)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($transfer->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        if (!in_array($transfer->status, ['in_transit', 'partially_received', 'pending'])) {
+            return back()->withErrors(['error' => "Transfer is not in transit or eligible for receipt."]);
+        }
+
+        $transfer->load(['sourceGodown', 'destGodown', 'items.item.unit', 'items.batch', 'request']);
+
+        return view('inventory.transfers.receipt', compact('transfer'));
+    }
+
+    public function receiptStore(Request $request, StockTransfer $transfer)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($transfer->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'receiver_remarks' => 'nullable|string',
+            'items' => 'required|array|min:1',
+            'items.*.transfer_item_id' => 'required|exists:stock_transfer_items,id',
+            'items.*.received_qty' => 'required|numeric|min:0',
+            'items.*.damaged_qty' => 'nullable|numeric|min:0',
+            'items.*.discrepancy_type' => 'nullable|string|in:shortage,damaged_goods,wrong_item,wrong_batch,quality_rejection,excess_quantity,other',
+            'items.*.discrepancy_reason' => 'nullable|string',
+            'items.*.remarks' => 'nullable|string',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->receiveTransferWithDiscrepancies(
+                $transfer,
+                $data['items'],
+                auth()->id() ?? 1,
+                $data['receiver_remarks'] ?? null
+            );
+
+            AuditLog::log('inventory', 'receipt', "Confirmed receipt for transfer {$transfer->transfer_no} (Status: {$transfer->status})");
+            return redirect()->route('inventory.transfers')->with('success', "Transfer {$transfer->transfer_no} receipt confirmation recorded (Status: {$transfer->status}).");
+        } catch (\Exception $e) {
+            return back()->withInput()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    // ==================== DISCREPANCY MANAGEMENT ====================
+
+    public function discrepancies(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = StockDiscrepancy::where('company_id', $companyId)
+            ->with(['transfer', 'request', 'item.unit', 'batch', 'sourceGodown', 'destGodown', 'creator', 'investigator', 'resolver', 'stockAdjustment']);
+
+        if ($request->filled('status')) {
+            $query->where('status', $request->get('status'));
+        }
+        if ($request->filled('discrepancy_type')) {
+            $query->where('discrepancy_type', $request->get('discrepancy_type'));
+        }
+
+        $discrepancies = $query->latest('id')->paginate(15);
+
+        return view('inventory.discrepancies.index', compact('discrepancies'));
+    }
+
+    public function discrepancyShow(StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $discrepancy->load([
+            'transfer.dispatcher', 'transfer.receiver', 'request.fromDepartment',
+            'item.unit', 'batch', 'sourceGodown', 'destGodown',
+            'creator', 'investigator', 'resolver', 'stockAdjustment.journalEntry',
+            'approvals.approver'
+        ]);
+
+        $sourceBatches = StockBatch::where('godown_id', $discrepancy->source_godown_id)
+            ->where('item_id', $discrepancy->item_id)
+            ->where('quantity', '>', 0)
+            ->get();
+
+        return view('inventory.discrepancies.show', compact('discrepancy', 'sourceBatches'));
+    }
+
+    public function discrepancyInvestigate(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'investigation_remarks' => 'required|string|min:3',
+        ]);
+
+        $inventoryService = new InventoryService();
+        $inventoryService->investigateDiscrepancy($discrepancy, $data['investigation_remarks'], auth()->id() ?? 1);
+
+        AuditLog::log('inventory', 'discrepancy_investigate', "Investigated discrepancy #{$discrepancy->id}");
+        return back()->with('success', "Discrepancy #{$discrepancy->id} updated to Under Investigation.");
+    }
+
+    public function discrepancySubmitWriteOff(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'reason' => 'required|string|min:3',
+        ]);
+
+        $inventoryService = new InventoryService();
+        $inventoryService->submitDiscrepancyWriteOff($discrepancy, $data['reason'], auth()->id() ?? 1);
+
+        AuditLog::log('inventory', 'discrepancy_writeoff_submit', "Submitted write-off for discrepancy #{$discrepancy->id}");
+        return back()->with('success', "Discrepancy #{$discrepancy->id} submitted for Write-Off Approval.");
+    }
+
+    public function discrepancyApproveWriteOff(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'remarks' => 'nullable|string',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->approveDiscrepancyWriteOff($discrepancy, auth()->id() ?? 1, $data['remarks'] ?? null);
+
+            AuditLog::log('inventory', 'discrepancy_writeoff_approve', "Approved write-off for discrepancy #{$discrepancy->id}");
+            return back()->with('success', "Discrepancy #{$discrepancy->id} write-off approved and financial journal entry created.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function discrepancyRejectWriteOff(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'reason' => 'required|string|min:3',
+        ]);
+
+        $inventoryService = new InventoryService();
+        $inventoryService->rejectDiscrepancyWriteOff($discrepancy, auth()->id() ?? 1, $data['reason']);
+
+        AuditLog::log('inventory', 'discrepancy_writeoff_reject', "Rejected write-off for discrepancy #{$discrepancy->id}");
+        return back()->with('info', "Discrepancy #{$discrepancy->id} write-off rejected.");
+    }
+
+    public function discrepancyResolveAdditionalDispatch(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'quantity' => 'required|numeric|min:0.001',
+            'batch_no' => 'required|string',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $newTransfer = $inventoryService->resolveDiscrepancyAdditionalDispatch($discrepancy, $data, auth()->id() ?? 1);
+
+            AuditLog::log('inventory', 'discrepancy_replacement', "Replacement dispatch {$newTransfer->transfer_no} for discrepancy #{$discrepancy->id}");
+            return back()->with('success', "Replacement transfer {$newTransfer->transfer_no} dispatched.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function discrepancyResolveSeparateDelivery(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'delivered_quantity' => 'required|numeric|min:0.001',
+            'notes' => 'required|string|min:3',
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->resolveDiscrepancySeparateDelivery($discrepancy, (float)$data['delivered_quantity'], auth()->id() ?? 1, $data['notes']);
+
+            AuditLog::log('inventory', 'discrepancy_separate_deliv', "Confirmed separate delivery for discrepancy #{$discrepancy->id}");
+            return back()->with('success', "Separate delivery confirmed and stock received into destination godown.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    public function discrepancyCancelOutstanding(Request $request, StockDiscrepancy $discrepancy)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($discrepancy->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'reason' => 'required|string|min:3',
+        ]);
+
+        $inventoryService = new InventoryService();
+        $inventoryService->cancelOutstandingDiscrepancy($discrepancy, auth()->id() ?? 1, $data['reason']);
+
+        AuditLog::log('inventory', 'discrepancy_cancel', "Cancelled outstanding requirement for discrepancy #{$discrepancy->id}");
+        return back()->with('info', "Discrepancy #{$discrepancy->id} outstanding requirement cancelled.");
+    }
+
+    // ==================== STOCK CONFIGURATION ====================
+
+    public function stockConfiguration(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $branches = Branch::where('company_id', $companyId)->with(['centralGodown', 'godowns'])->get();
+        $departments = Department::where('company_id', $companyId)->with(['branch', 'defaultGodown', 'sourceGodown'])->get();
+        $godowns = Godown::where('company_id', $companyId)->where('status', 'active')->get();
+
+        return view('inventory.configuration', compact('branches', 'departments', 'godowns'));
+    }
+
+    public function branchStockConfigUpdate(Request $request, Branch $branch)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($branch->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'stock_mode' => 'required|in:centralized,multiple_locations',
+            'central_godown_id' => [
+                'nullable',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+        ]);
+
+        $inventoryService = new InventoryService();
+        $inventoryService->configureBranchStock($branch, $data['stock_mode'], $data['central_godown_id'] ?? null, auth()->id() ?? 1);
+
+        AuditLog::log('inventory', 'config_branch', "Updated stock mode to {$data['stock_mode']} for Branch {$branch->name}");
+        return back()->with('success', "Stock configuration updated for Branch {$branch->name}.");
+    }
+
+    public function departmentStockConfigUpdate(Request $request, Department $department)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        if ($department->company_id != $companyId) {
+            abort(403, 'Unauthorized company boundary access.');
+        }
+
+        $data = $request->validate([
+            'maintains_stock' => 'required|boolean',
+            'default_godown_id' => [
+                'nullable',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+            'source_godown_id' => [
+                'nullable',
+                Rule::exists('godowns', 'id')->where('company_id', $companyId),
+            ],
+        ]);
+
+        try {
+            $inventoryService = new InventoryService();
+            $inventoryService->configureDepartmentStock(
+                $department,
+                (bool)$data['maintains_stock'],
+                $data['default_godown_id'] ?? null,
+                $data['source_godown_id'] ?? null,
+                auth()->id() ?? 1
+            );
+
+            AuditLog::log('inventory', 'config_department', "Updated department stock configuration for {$department->name}");
+            return back()->with('success', "Stock configuration updated for Department {$department->name}.");
+        } catch (\Exception $e) {
+            return back()->withErrors(['error' => $e->getMessage()]);
+        }
+    }
+
+    // ==================== PHASE 10: REPORTS & DASHBOARDS ====================
+
+    public function reportStockRequests(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = StockRequest::where('company_id', $companyId)
+            ->with(['branch', 'fromDepartment', 'sourceGodown', 'fromGodown', 'items.item.unit', 'creator', 'approver']);
+
+        if ($request->filled('status')) $query->where('status', $request->get('status'));
+        if ($request->filled('from_department_id')) $query->where('from_department_id', $request->get('from_department_id'));
+        if ($request->filled('date_from')) $query->whereDate('request_date', '>=', $request->get('date_from'));
+        if ($request->filled('date_to')) $query->whereDate('request_date', '<=', $request->get('date_to'));
+
+        $requests = $query->latest('request_date')->paginate(20);
+        $departments = Department::where('company_id', $companyId)->get();
+
+        return view('inventory.reports.requests', compact('requests', 'departments'));
+    }
+
+    public function reportStockTransfers(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = StockTransfer::where('company_id', $companyId)
+            ->with(['sourceBranch', 'destBranch', 'sourceGodown', 'destGodown', 'items.item.unit', 'items.batch', 'request']);
+
+        if ($request->filled('status')) $query->where('status', $request->get('status'));
+        if ($request->filled('source_godown_id')) $query->where('source_godown_id', $request->get('source_godown_id'));
+        if ($request->filled('dest_godown_id')) $query->where('dest_godown_id', $request->get('dest_godown_id'));
+
+        $transfers = $query->latest('transfer_date')->paginate(20);
+        $godowns = Godown::where('company_id', $companyId)->get();
+
+        return view('inventory.reports.transfers', compact('transfers', 'godowns'));
+    }
+
+    public function reportPendingReceipts(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $pendingTransfers = StockTransfer::where('company_id', $companyId)
+            ->whereIn('status', ['in_transit', 'partially_received'])
+            ->with(['sourceGodown', 'destGodown', 'dispatcher', 'items.item.unit', 'items.batch', 'request'])
+            ->latest('dispatched_at')
+            ->paginate(20);
+
+        return view('inventory.reports.pending_receipts', compact('pendingTransfers'));
+    }
+
+    public function reportDiscrepancies(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = StockDiscrepancy::where('company_id', $companyId)
+            ->with(['transfer', 'request', 'item.unit', 'batch', 'sourceGodown', 'destGodown', 'creator', 'resolver']);
+
+        if ($request->filled('status')) $query->where('status', $request->get('status'));
+        if ($request->filled('discrepancy_type')) $query->where('discrepancy_type', $request->get('discrepancy_type'));
+
+        $discrepancies = $query->latest('id')->paginate(20);
+
+        return view('inventory.reports.discrepancies', compact('discrepancies'));
+    }
+
+    public function reportInTransit(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $inTransitItems = StockTransferItem::whereHas('transfer', function ($q) use ($companyId) {
+                $q->where('company_id', $companyId)->whereIn('status', ['in_transit', 'partially_received']);
+            })
+            ->where('in_transit_qty', '>', 0)
+            ->with(['transfer.sourceGodown', 'transfer.destGodown', 'transfer.dispatcher', 'item.unit', 'batch'])
+            ->paginate(20);
+
+        return view('inventory.reports.in_transit', compact('inTransitItems'));
+    }
+
+    public function reportLocationStock(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $godowns = Godown::where('company_id', $companyId)->with('department')->get();
+        $selectedGodownId = $request->get('godown_id');
+
+        $query = StockBatch::where('company_id', $companyId)->where('quantity', '>', 0)->with(['item.unit', 'godown.department']);
+        if ($selectedGodownId) {
+            $query->where('godown_id', $selectedGodownId);
+        }
+
+        $batches = $query->orderBy('godown_id')->orderBy('item_id')->paginate(25);
+
+        return view('inventory.reports.location_stock', compact('batches', 'godowns', 'selectedGodownId'));
+    }
+
+    public function reportMaterialConsumption(Request $request)
+    {
+        $companyId = CompanyContextService::getActiveCompanyId();
+        $query = DailyOperationMaterial::whereHas('dailyOperation', function ($q) use ($companyId) {
+                $q->where('company_id', $companyId);
+            })
+            ->with(['dailyOperation.department', 'item.unit', 'sourceGodown']);
+
+        if ($request->filled('department_id')) {
+            $query->whereHas('dailyOperation', fn($q) => $q->where('department_id', $request->get('department_id')));
+        }
+        if ($request->filled('item_id')) {
+            $query->where('item_id', $request->get('item_id'));
+        }
+
+        $consumptions = $query->latest('id')->paginate(25);
+        $departments = Department::where('company_id', $companyId)->get();
+        $items = Item::where('company_id', $companyId)->get();
+
+        return view('inventory.reports.consumption', compact('consumptions', 'departments', 'items'));
     }
 }
 

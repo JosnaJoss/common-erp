@@ -22,8 +22,20 @@ class Branch extends Model
         'email',
         'branch_manager',
         'is_main_branch',
+        'stock_mode',
+        'central_godown_id',
         'status',
     ];
+
+    public function centralGodown()
+    {
+        return $this->belongsTo(Godown::class, 'central_godown_id');
+    }
+
+    public function isCentralizedStock(): bool
+    {
+        return ($this->stock_mode ?? 'centralized') === 'centralized';
+    }
 
     public function company()
     {

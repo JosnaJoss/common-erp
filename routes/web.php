@@ -197,6 +197,47 @@ Route::middleware(['auth', 'company.context'])->group(function () {
         Route::get('/alerts', [InventoryController::class, 'alerts'])->name('alerts');
         Route::get('/opening-stock', [InventoryController::class, 'openingStock'])->name('opening_stock.index');
         Route::post('/opening-stock', [InventoryController::class, 'openingStockStore'])->name('opening_stock.store');
+
+        // Internal Stock Requests
+        Route::get('/requests', [InventoryController::class, 'requests'])->name('requests.index');
+        Route::get('/requests/create', [InventoryController::class, 'requestCreate'])->name('requests.create');
+        Route::post('/requests', [InventoryController::class, 'requestStore'])->name('requests.store');
+        Route::get('/requests/{stockRequest}', [InventoryController::class, 'requestShow'])->name('requests.show');
+        Route::post('/requests/{stockRequest}/approve', [InventoryController::class, 'requestApprove'])->name('requests.approve');
+        Route::post('/requests/{stockRequest}/reject', [InventoryController::class, 'requestReject'])->name('requests.reject');
+        Route::get('/requests/{stockRequest}/dispatch', [InventoryController::class, 'dispatchCreate'])->name('requests.dispatch.create');
+        Route::post('/requests/{stockRequest}/dispatch', [InventoryController::class, 'dispatchStore'])->name('requests.dispatch.store');
+
+        // Transfer Receipts
+        Route::get('/transfers/{transfer}/receipt', [InventoryController::class, 'receiptCreate'])->name('transfers.receipt.create');
+        Route::post('/transfers/{transfer}/receipt', [InventoryController::class, 'receiptStore'])->name('transfers.receipt.store');
+
+        // Discrepancy Management
+        Route::get('/discrepancies', [InventoryController::class, 'discrepancies'])->name('discrepancies.index');
+        Route::get('/discrepancies/{discrepancy}', [InventoryController::class, 'discrepancyShow'])->name('discrepancies.show');
+        Route::post('/discrepancies/{discrepancy}/investigate', [InventoryController::class, 'discrepancyInvestigate'])->name('discrepancies.investigate');
+        Route::post('/discrepancies/{discrepancy}/write-off-submit', [InventoryController::class, 'discrepancySubmitWriteOff'])->name('discrepancies.write_off.submit');
+        Route::post('/discrepancies/{discrepancy}/write-off-approve', [InventoryController::class, 'discrepancyApproveWriteOff'])->name('discrepancies.write_off.approve');
+        Route::post('/discrepancies/{discrepancy}/write-off-reject', [InventoryController::class, 'discrepancyRejectWriteOff'])->name('discrepancies.write_off.reject');
+        Route::post('/discrepancies/{discrepancy}/additional-dispatch', [InventoryController::class, 'discrepancyResolveAdditionalDispatch'])->name('discrepancies.additional_dispatch');
+        Route::post('/discrepancies/{discrepancy}/separate-delivery', [InventoryController::class, 'discrepancyResolveSeparateDelivery'])->name('discrepancies.separate_delivery');
+        Route::post('/discrepancies/{discrepancy}/cancel', [InventoryController::class, 'discrepancyCancelOutstanding'])->name('discrepancies.cancel');
+
+        // Stock Configuration
+        Route::get('/stock-configuration', [InventoryController::class, 'stockConfiguration'])->name('configuration');
+        Route::post('/branches/{branch}/stock-config', [InventoryController::class, 'branchStockConfigUpdate'])->name('branches.stock_config');
+        Route::post('/departments/{department}/stock-config', [InventoryController::class, 'departmentStockConfigUpdate'])->name('departments.stock_config');
+
+        // Inventory & Movement Reports
+        Route::prefix('reports')->name('reports.')->group(function () {
+            Route::get('/stock-requests', [InventoryController::class, 'reportStockRequests'])->name('requests');
+            Route::get('/stock-transfers', [InventoryController::class, 'reportStockTransfers'])->name('transfers');
+            Route::get('/pending-receipts', [InventoryController::class, 'reportPendingReceipts'])->name('pending_receipts');
+            Route::get('/discrepancies', [InventoryController::class, 'reportDiscrepancies'])->name('discrepancies');
+            Route::get('/in-transit', [InventoryController::class, 'reportInTransit'])->name('in_transit');
+            Route::get('/location-stock', [InventoryController::class, 'reportLocationStock'])->name('location_stock');
+            Route::get('/material-consumption', [InventoryController::class, 'reportMaterialConsumption'])->name('material_consumption');
+        });
     });
 
     // Procurement & Purchases

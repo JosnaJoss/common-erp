@@ -11,7 +11,9 @@ class StockTransfer extends Model
 
     protected $fillable = [
         'company_id',
+        'stock_request_id',
         'transfer_no',
+        'dispatch_reference',
         'transfer_date',
         'source_branch_id',
         'source_godown_id',
@@ -23,6 +25,7 @@ class StockTransfer extends Model
         'received_by',
         'received_at',
         'remarks',
+        'receiver_remarks',
         'created_by',
     ];
 
@@ -65,6 +68,16 @@ class StockTransfer extends Model
     public function creator()
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function request()
+    {
+        return $this->belongsTo(StockRequest::class, 'stock_request_id');
+    }
+
+    public function discrepancies()
+    {
+        return $this->hasMany(StockDiscrepancy::class, 'stock_transfer_id');
     }
 
     public function items()

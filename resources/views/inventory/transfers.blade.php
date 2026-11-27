@@ -8,9 +8,17 @@
         <h4 class="fw-bold mb-1">Inter-Godown Stock Transfers</h4>
         <p class="text-muted small mb-0">Transfer inventory seamlessly between branch godowns with real-time stock relocation</p>
     </div>
-    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newTransferModal">
-        <i class="bi bi-arrow-left-right me-1"></i> New Stock Transfer
-    </button>
+    <div class="d-flex gap-2">
+        <a href="{{ route('inventory.requests.index') }}" class="btn btn-outline-primary">
+            <i class="bi bi-file-earmark-text me-1"></i> Stock Requests
+        </a>
+        <a href="{{ route('inventory.discrepancies.index') }}" class="btn btn-outline-danger">
+            <i class="bi bi-exclamation-triangle me-1"></i> Discrepancies
+        </a>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newTransferModal">
+            <i class="bi bi-arrow-left-right me-1"></i> New Direct Transfer
+        </button>
+    </div>
 </div>
 
 <!-- Transfer List -->
@@ -88,13 +96,10 @@
                                         <i class="bi bi-truck me-1"></i> Dispatch
                                     </button>
                                 </form>
-                                @elseif($trf->status === 'in_transit')
-                                <form method="POST" action="{{ route('inventory.transfers.receive', $trf->id) }}" class="d-inline">
-                                    @csrf
-                                    <button type="submit" class="btn btn-sm btn-success" onclick="return confirm('Confirm receipt and add stock to destination warehouse?')">
-                                        <i class="bi bi-box-seam me-1"></i> Confirm Receipt
-                                    </button>
-                                </form>
+                                @elseif(in_array($trf->status, ['in_transit', 'partially_received']))
+                                <a href="{{ route('inventory.transfers.receipt.create', $trf->id) }}" class="btn btn-sm btn-success">
+                                    <i class="bi bi-box-seam me-1"></i> Verify & Receive
+                                </a>
                                 @else
                                 <span class="badge bg-light text-success border"><i class="bi bi-check-all"></i> Finalized</span>
                                 @endif

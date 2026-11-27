@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
+use App\Models\Branch;
 use App\Models\DailyOperation;
 use App\Models\DailyOperationDistribution;
 use App\Models\DailyOperationEmployee;
 use App\Models\DailyOperationMaterial;
 use App\Models\DailyOperationOutput;
 use App\Models\DailyOperationWastage;
+use App\Models\Department;
 use App\Models\Item;
 use App\Models\Staff;
 use App\Models\StockBatch;
@@ -68,6 +70,17 @@ class DailyOperationService
                 if ($counter > 10) break;
             }
 
+            // Resolve default source godown based on department stock configuration
+            $department = Department::find($data['department_id']);
+            $defaultDeptSource = null;
+            if ($department) {
+                if ($department->maintains_stock && $department->default_godown_id) {
+                    $defaultDeptSource = $department->default_godown_id;
+                } else {
+                    $defaultDeptSource = $department->source_godown_id ?: ($department->branch?->central_godown_id);
+                }
+            }
+
             // Calculate total costs
             $totalLaborCost = 0;
             foreach ($employees as $emp) {
@@ -76,10 +89,13 @@ class DailyOperationService
             }
 
             $totalMaterialCost = 0;
-            foreach ($materials as $mat) {
+            foreach ($materials as $k => $mat) {
+                $matSource = !empty($mat['source_godown_id']) ? (int)$mat['source_godown_id'] : $defaultDeptSource;
+                $materials[$k]['source_godown_id'] = $matSource;
+
                 $unitCost = (float)($mat['unit_cost'] ?? 0);
                 if ($unitCost <= 0) {
-                    $sb = StockBatch::where('godown_id', $mat['source_godown_id'])
+                    $sb = StockBatch::where('godown_id', $matSource)
                         ->where('item_id', $mat['item_id'])
                         ->where('batch_no', $mat['batch_no'] ?? 'DEFAULT')
                         ->first();
@@ -257,7 +273,7 @@ class DailyOperationService
                 $this->postOperationStock($operation, $userId);
             }
 
-            return $operation;
+            return $operation->fresh();
         });
     }
 
