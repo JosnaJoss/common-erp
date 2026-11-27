@@ -381,6 +381,10 @@ class NewErpModulesCompleteTest extends TestCase
             'pf_applicable' => false,
             'esi_applicable' => false,
         ]);
+        \App\Models\Overtime::where('company_id', $this->company->id)
+            ->where('staff_id', $staff->id)
+            ->where('date', 'like', "{$salaryMonth}%")
+            ->delete();
 
         // 2. Record 2 Absent Days (Loss of Pay)
         $today = Carbon::now();

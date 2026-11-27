@@ -21,6 +21,7 @@ class User extends Authenticatable
         'company_id',
         'branch_id',
         'role_id',
+        'staff_id',
         'is_active',
         'last_login_at',
     ];
@@ -51,6 +52,11 @@ class User extends Authenticatable
         return $this->belongsTo(Role::class);
     }
 
+    public function staff()
+    {
+        return $this->belongsTo(Staff::class, 'staff_id');
+    }
+
     public function companies()
     {
         return $this->belongsToMany(Company::class, 'user_company_branches')->withPivot('branch_id');
@@ -58,12 +64,16 @@ class User extends Authenticatable
 
     public function isSuperAdmin(): bool
     {
-        return $this->role && $this->role->slug === 'super-admin';
+        return $this->role && $this->role->slug === 'super-admin' && $this->role->is_system && is_null($this->role->company_id);
     }
 
     public function hasRole(string $slug): bool
     {
-        return $this->role && $this->role->slug === $slug;
+        if (!$this->role) {
+            return false;
+        }
+
+        return $this->role->slug === $slug || str_starts_with($this->role->slug, $slug . '-');
     }
 
     public function hasPermission(string $module, string $action): bool

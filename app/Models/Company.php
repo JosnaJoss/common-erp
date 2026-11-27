@@ -44,6 +44,16 @@ class Company extends Model
         return $this->hasMany(CompanyModule::class);
     }
 
+    public function users()
+    {
+        return $this->hasMany(User::class);
+    }
+
+    public function roles()
+    {
+        return $this->hasMany(Role::class);
+    }
+
     public function isModuleEnabled(string $key): bool
     {
         $mod = $this->modules->where('module_key', $key)->first();

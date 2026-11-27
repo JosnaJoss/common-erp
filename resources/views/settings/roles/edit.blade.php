@@ -5,7 +5,14 @@
 @section('content')
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h4 class="fw-bold mb-1">Permission Matrix: {{ $role->name }}</h4>
+        <h4 class="fw-bold mb-1">
+            Permission Matrix: {{ $role->name }}
+            @if($role->company)
+                <span class="badge bg-light text-dark border fs-6 fw-normal ms-2">
+                    <i class="bi bi-building text-primary me-1"></i>{{ $role->company->name }}
+                </span>
+            @endif
+        </h4>
         <p class="text-muted small mb-0">Manage granular permissions across all ERP modules: view, add, edit, delete, approve, and export</p>
     </div>
     <a href="{{ route('settings.roles.index') }}" class="btn btn-outline-secondary">

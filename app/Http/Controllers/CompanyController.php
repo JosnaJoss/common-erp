@@ -71,6 +71,9 @@ class CompanyController extends Controller
             ]);
         }
 
+        // Seed Company-specific default roles
+        \App\Models\Role::seedCompanyRoles($company->id);
+
         AuditLog::log('company', 'create', "Created company: {$company->name} ({$company->code})");
 
         return redirect()->route('companies.index')->with('success', 'Company created successfully.');
@@ -124,6 +127,10 @@ class CompanyController extends Controller
     {
         $companyId = (int)$request->input('company_id');
         $company = Company::findOrFail($companyId);
+
+        if (auth()->check() && !auth()->user()->isSuperAdmin() && auth()->user()->company_id != $company->id) {
+            abort(403, 'Unauthorized access to switch to another company.');
+        }
 
         session(['active_company_id' => $company->id]);
         session()->forget('active_branch_id');
